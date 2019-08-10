@@ -1,0 +1,31 @@
+{
+  "files": {
+    "main.css": "/static/css/main.9063251c.chunk.css",
+    "main.js": "/static/js/main.f2ee2d7d.chunk.js",
+    "main.js.map": "/static/js/main.f2ee2d7d.chunk.js.map",
+    "runtime~main.js": "/static/js/runtime~main.b4dc62de.js",
+    "runtime~main.js.map": "/static/js/runtime~main.b4dc62de.js.map",
+    "static/js/2.88fff171.chunk.js": "/static/js/2.88fff171.chunk.js",
+    "static/js/2.88fff171.chunk.js.map": "/static/js/2.88fff171.chunk.js.map",
+    "static/js/3.eefec95c.chunk.js": "/static/js/3.eefec95c.chunk.js",
+    "static/js/3.eefec95c.chunk.js.map": "/static/js/3.eefec95c.chunk.js.map",
+    "static/js/4.8f75e97e.chunk.js": "/static/js/4.8f75e97e.chunk.js",
+    "static/js/4.8f75e97e.chunk.js.map": "/static/js/4.8f75e97e.chunk.js.map",
+    "static/js/5.d4ad0c90.chunk.js": "/static/js/5.d4ad0c90.chunk.js",
+    "static/js/5.d4ad0c90.chunk.js.map": "/static/js/5.d4ad0c90.chunk.js.map",
+    "static/js/6.31e9736d.chunk.js": "/static/js/6.31e9736d.chunk.js",
+    "static/js/6.31e9736d.chunk.js.map": "/static/js/6.31e9736d.chunk.js.map",
+    "index.html": "/index.html",
+    "precache-manifest.94d4d90f785c1fd5f2dea4873b27879f.js": "/precache-manifest.94d4d90f785c1fd5f2dea4873b27879f.js",
+    "service-worker.js": "/service-worker.js",
+    "static/css/main.9063251c.chunk.css.map": "/static/css/main.9063251c.chunk.css.map",
+    "static/media/app.css": "/static/media/header-bg.82cb8caa.jpg",
+    "static/media/edash-thumbnail.png": "/static/media/edash-thumbnail.c3522cc2.png",
+    "static/media/gaimz-thumbnail.jpg": "/static/media/gaimz-thumbnail.7662731d.jpg",
+    "static/media/karhabti-android.png": "/static/media/karhabti-android.7fbd57bb.png",
+    "static/media/karhabti-ios.jpg": "/static/media/karhabti-ios.9c0bf081.jpg",
+    "static/media/rep-thumbnail.png": "/static/media/rep-thumbnail.c48fee25.png",
+    "static/media/souhaib.jpg": "/static/media/souhaib.f0e2b039.jpg",
+    "static/media/techstamp-thumbnail.jpg": "/static/media/techstamp-thumbnail.5c83a334.jpg"
+  }
+}
