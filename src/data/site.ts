@@ -8,7 +8,7 @@ export const profile = {
   tagline: 'I turn AI capabilities into real products — owned end to end, from agent tooling and APIs up to a refined UI.',
   location: 'München, Germany',
   availability: 'Open to remote roles across the EU',
-  email: 'souhaib.en.farhat@gmail.com',
+  email: 'souhaib.b.farhat@gmail.com',
   phone: '+49 163 214 9290',
   links: {
     linkedin: 'https://www.linkedin.com/in/souhaib-ben-farhat/?locale=en',
