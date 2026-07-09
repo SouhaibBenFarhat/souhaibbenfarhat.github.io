@@ -1,0 +1,41 @@
+---
+import { skills } from '../../data/site';
+const levelDot = { Strong: 'bg-accent', Working: 'bg-accent/55', Familiar: 'bg-line' } as const;
+---
+<section id="skills" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <p class="label">Skills</p>
+    <h2 class="mt-4 max-w-3xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+      What I work with
+    </h2>
+    <p class="mt-5 max-w-prose text-[0.95rem] leading-relaxed text-muted">
+      An honest map rather than a buzzword wall. The depth marker is deliberate — frontend and AI are my
+      strongest areas; backend is genuine, day-to-day reach rather than specialism.
+    </p>
+
+    <div class="mt-6 flex flex-wrap items-center gap-5 text-xs text-muted">
+      <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-accent"></span> Strong</span>
+      <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-accent/55"></span> Working</span>
+      <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-line"></span> Familiar</span>
+    </div>
+
+    <div class="mt-8 grid gap-5 sm:grid-cols-2">
+      {skills.map((g) => (
+        <div class="card reveal">
+          <p class="label">{g.group}</p>
+          <ul class="mt-5 space-y-3">
+            {g.items.map((it) => (
+              <li class="flex items-center justify-between gap-4">
+                <span class="text-[0.95rem]">{it.name}</span>
+                <span class="flex items-center gap-2 text-xs text-muted">
+                  <span class={`h-2 w-2 rounded-full ${levelDot[it.level]}`}></span>
+                  {it.level}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

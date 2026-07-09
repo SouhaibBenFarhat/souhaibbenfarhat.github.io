@@ -1,0 +1,45 @@
+---
+import { projects } from '../../data/site';
+---
+<section id="work" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <p class="label">Selected work</p>
+    <h2 class="mt-4 max-w-3xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+      Work I'm proud of
+    </h2>
+    <p class="mt-5 max-w-prose text-[0.95rem] leading-relaxed text-muted">
+      A selection of recent work, described at a level that respects my employer's confidentiality —
+      impact and approach over internal specifics. Happy to go deeper in a conversation.
+    </p>
+
+    <div class="mt-8 flex flex-col divide-y divide-line">
+      {projects.map((p) => (
+        <article id={p.slug} class="reveal scroll-mt-24 py-12 first:pt-2">
+          <div class="grid gap-8 md:grid-cols-[0.9fr_1.4fr]">
+            <div>
+              <p class="label">{p.kicker}</p>
+              <h3 class="mt-3 font-display text-2xl leading-tight tracking-tight sm:text-3xl">{p.title}</h3>
+              <p class="mt-4 text-[0.95rem] leading-relaxed text-muted">{p.summary}</p>
+              <div class="mt-5 flex flex-wrap gap-2">
+                {p.pillars.map((pl) => <span class="tag border-accent/30 text-accent">{pl}</span>)}
+              </div>
+            </div>
+            <div>
+              <ul class="space-y-3.5">
+                {p.details.map((d) => (
+                  <li class="flex gap-3 text-[0.95rem] leading-relaxed">
+                    <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
+                    <span>{d}</span>
+                  </li>
+                ))}
+              </ul>
+              <div class="mt-6 flex flex-wrap gap-2">
+                {p.tags.map((t) => <span class="tag">{t}</span>)}
+              </div>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

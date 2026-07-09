@@ -1,0 +1,44 @@
+---
+import { experience, profile } from '../../data/site';
+---
+<section id="experience" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <p class="label">Experience</p>
+    <h2 class="mt-4 max-w-3xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+      Where I've worked
+    </h2>
+    <p class="mt-5 max-w-prose text-[0.95rem] leading-relaxed text-muted">
+      Building SaaS products in Munich since 2018 — frontend depth throughout, broadening into backend,
+      architecture, and AI.
+    </p>
+
+    <div class="mt-8">
+      {experience.map((r) => (
+        <article class="reveal grid scroll-mt-24 gap-6 border-t border-line py-12 first:border-t-0 first:pt-0 md:grid-cols-[0.7fr_2fr]">
+          <div>
+            <p class="font-display text-xl">{r.company}</p>
+            <p class="mt-1 text-sm text-muted">{r.role}</p>
+            <p class="mt-3 text-xs uppercase tracking-label text-muted">{r.period}</p>
+            <p class="text-xs text-muted">{r.location}</p>
+          </div>
+          <div>
+            {r.blurb && <p class="max-w-prose text-[0.95rem] italic leading-relaxed text-muted">{r.blurb}</p>}
+            {r.points.length > 0 && (
+              <ul class="mt-4 space-y-3">
+                {r.points.map((pt) => (
+                  <li class="flex gap-3 text-[0.95rem] leading-relaxed">
+                    <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div class="mt-5 flex flex-wrap gap-2">
+              {r.stack.map((s) => <span class="tag">{s}</span>)}
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

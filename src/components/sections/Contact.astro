@@ -1,0 +1,49 @@
+---
+import { profile } from '../../data/site';
+
+const channels = [
+  { label: 'Email', value: profile.email, href: `mailto:${profile.email}`, primary: true },
+  { label: 'LinkedIn', value: 'in/souhaib-ben-farhat', href: profile.links.linkedin },
+  { label: 'Phone', value: profile.phone, href: `tel:${profile.phone.replace(/\s/g, '')}` },
+];
+---
+<section id="contact" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    {/* Closing pitch */}
+    <div class="reveal rounded-3xl border border-line bg-surface px-8 py-14 text-center shadow-[var(--shadow-lg)]">
+      <h2 class="mx-auto max-w-2xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+        Looking for a fullstack engineer who can take AI features from idea to production?
+      </h2>
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href={profile.cv} class="btn-solid" download>
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg>
+          Download CV
+        </a>
+        <a href={`mailto:${profile.email}`} class="btn">Email me</a>
+      </div>
+    </div>
+
+    {/* Contact details */}
+    <div class="mt-16">
+      <p class="label">Contact</p>
+      <h3 class="mt-4 font-display text-3xl leading-tight tracking-tight sm:text-4xl">Let's talk.</h3>
+      <p class="mt-5 max-w-prose text-[1.02rem] leading-relaxed text-muted">
+        Open to senior and staff-level fullstack roles with an AI focus — remote across the EU, or hybrid
+        in Munich. The fastest way to reach me is email; I'm happy to walk through any of the work in more detail.
+      </p>
+
+      <div class="mt-10 grid gap-4 sm:max-w-2xl sm:grid-cols-2">
+        {channels.map((c) => (
+          <a href={c.href} target={c.href.startsWith('http') ? '_blank' : undefined} rel="noopener"
+             class={`card flex items-center justify-between gap-4 ${c.primary ? 'sm:col-span-2' : ''}`}>
+            <span>
+              <span class="label">{c.label}</span>
+              <span class="mt-1.5 block text-[0.98rem]">{c.value}</span>
+            </span>
+            <svg class="h-5 w-5 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+          </a>
+        ))}
+      </div>
+    </div>
+  </div>
+</section>
