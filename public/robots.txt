@@ -1,0 +1,5 @@
+# https://souhaibbenfarhat.github.io
+User-agent: *
+Allow: /
+
+Sitemap: https://souhaibbenfarhat.github.io/sitemap.xml

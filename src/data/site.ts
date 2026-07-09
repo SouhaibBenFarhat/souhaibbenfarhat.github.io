@@ -6,6 +6,9 @@ export const profile = {
   name: 'Souhaib Ben Farhat',
   title: 'Senior Fullstack Engineer — AI Focus',
   tagline: 'I turn AI capabilities into real products — owned end to end, from agent tooling and APIs up to a refined UI.',
+  // Keyword-front-loaded description for search snippets & social cards (~150 chars).
+  seoDescription:
+    'Souhaib Ben Farhat — Senior Fullstack Engineer (AI focus) in München. 8+ years in React, TypeScript & Python, now building AI agent products end to end.',
   location: 'München, Germany',
   availability: 'Open to remote roles across the EU',
   email: 'souhaib.b.farhat@gmail.com',
