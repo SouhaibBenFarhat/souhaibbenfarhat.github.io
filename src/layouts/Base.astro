@@ -100,6 +100,12 @@ const personSchema = {
     </main>
     <Footer />
 
+    {/* Analytics — boots only in the CI/production build (env-gated in analytics.ts) */}
+    <script>
+      import { initAnalytics } from '../lib/analytics';
+      initAnalytics();
+    </script>
+
     <button id="back-to-top" type="button" aria-label="Back to top"
       class="fixed bottom-6 right-6 z-40 grid h-11 w-11 place-items-center rounded-full border border-line bg-surface text-muted opacity-0 shadow-[var(--shadow-md)] transition-opacity duration-300 hover:border-accent hover:text-accent pointer-events-none">
       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>

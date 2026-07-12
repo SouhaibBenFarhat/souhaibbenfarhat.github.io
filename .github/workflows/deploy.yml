@@ -23,6 +23,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Build with Astro
         uses: withastro/action@v3
+        env:
+          # Turns analytics ON — only ever set here, in the production deploy.
+          PUBLIC_ENABLE_ANALYTICS: 'true'
+          # PostHog project key (public). Set as a repo variable: Settings → Secrets and variables → Actions → Variables.
+          PUBLIC_POSTHOG_KEY: ${{ vars.PUBLIC_POSTHOG_KEY }}
+          PUBLIC_POSTHOG_HOST: ${{ vars.PUBLIC_POSTHOG_HOST || 'https://eu.i.posthog.com' }}
 
   deploy:
     needs: build

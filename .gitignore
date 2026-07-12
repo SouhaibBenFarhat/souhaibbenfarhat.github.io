@@ -8,6 +8,7 @@ node_modules/
 # environment / editor
 .env
 .env.*
+!.env.example
 .DS_Store
 *.log
 .vscode/
