@@ -82,6 +82,8 @@ export async function initAnalytics(): Promise<void> {
     loaded: (ph) => {
       resetIfNewDay(ph);
       ph.capture('$pageview');
+      // TEMP diagnostic hook for session-replay debugging — remove once confirmed.
+      (window as unknown as { __ph?: unknown }).__ph = ph;
     },
   });
 }
