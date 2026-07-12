@@ -24,29 +24,22 @@ function loadPostHog(): Promise<PostHog> {
   return posthogPromise;
 }
 
-// A visitor id that resets each calendar day (UTC): the same person returning the
-// next day is counted as a NEW unique. We mint a random id, store it in localStorage
-// keyed by today's date, and reuse it only while the date matches. PostHog's own
-// persistence is kept in memory so it never overrides this daily id.
-function dailyDistinctId(): string {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-  const STORE = 'ph_daily_id';
+// Daily-unique identity: reset to a fresh anonymous id whenever the calendar day
+// changes, so a visitor returning the next day is counted as a NEW unique.
+// NOTE: we use localStorage+cookie persistence (not 'memory') because Session Replay
+// silently does not record under memory persistence. This daily reset preserves the
+// per-day unique counting on top of persistent storage.
+const DAY_KEY = 'ph_day';
+function resetIfNewDay(posthog: PostHog): void {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}');
-    if (saved.date === today && saved.id) return saved.id as string;
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+    if (localStorage.getItem(DAY_KEY) !== today) {
+      posthog.reset(); // fresh anonymous distinct_id + session
+      localStorage.setItem(DAY_KEY, today);
+    }
   } catch {
-    /* localStorage unavailable (private mode) — fall through to a fresh id */
+    /* localStorage unavailable (private mode) — skip the daily reset */
   }
-  const id =
-    typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `${today}-${Math.random().toString(36).slice(2)}`;
-  try {
-    localStorage.setItem(STORE, JSON.stringify({ id, date: today }));
-  } catch {
-    /* ignore write failure */
-  }
-  return id;
 }
 
 // Owner opt-out: visiting the site once with `?internal=1` permanently excludes THIS
@@ -81,13 +74,15 @@ export async function initAnalytics(): Promise<void> {
     // ad-blockers don't drop events; ui_host keeps dashboard/toolbar links on PostHog.
     api_host: HOST,
     ui_host: 'https://eu.posthog.com',
-    capture_pageview: true,
-    // Daily-rotating identity (see dailyDistinctId): unique visitors are counted
-    // per calendar day. Memory persistence so PostHog doesn't keep its own long-lived
-    // id; our bootstrapped daily id is the source of truth.
-    persistence: 'memory',
-    bootstrap: { distinctID: dailyDistinctId() },
+    // localStorage+cookie is REQUIRED for Session Replay to record (memory persistence
+    // silently disables it). Daily-unique counting is preserved by resetIfNewDay below.
+    persistence: 'localStorage+cookie',
+    capture_pageview: false, // captured in `loaded`, after the daily-reset check
     person_profiles: 'identified_only',
+    loaded: (ph) => {
+      resetIfNewDay(ph);
+      ph.capture('$pageview');
+    },
   });
 }
 
