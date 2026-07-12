@@ -31,7 +31,10 @@ export async function initAnalytics(): Promise<void> {
   posthog.init(KEY as string, {
     api_host: HOST,
     capture_pageview: true,
-    persistence: 'memory', // cookieless → no consent banner needed (GDPR-friendly)
+    // Persistent identity → accurate unique-visitor / new-vs-returning counts.
+    // (Was 'memory' i.e. cookieless; switched because uniqueness matters more here
+    // than avoiding a consent banner — this is a personal portfolio.)
+    persistence: 'localStorage+cookie',
     person_profiles: 'identified_only',
   });
 }
