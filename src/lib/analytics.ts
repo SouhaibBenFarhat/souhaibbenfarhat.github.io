@@ -49,9 +49,32 @@ function dailyDistinctId(): string {
   return id;
 }
 
-/** Boot analytics once, on page load. No-op when disabled. */
+// Owner opt-out: visiting the site once with `?internal=1` permanently excludes THIS
+// browser from analytics (a flag is stored locally). Afterwards, normal visits send
+// nothing — no query param needed. Set once per device; lasts until browser storage
+// is cleared.
+const OPTOUT_KEY = 'ph_optout';
+function isOptedOut(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('internal') === '1') {
+      localStorage.setItem(OPTOUT_KEY, '1');
+      // Strip the flag from the address bar so the URL isn't accidentally shared/bookmarked.
+      const url = new URL(window.location.href);
+      url.searchParams.delete('internal');
+      history.replaceState({}, '', url);
+      console.info('[analytics] This browser is now excluded from analytics (owner opt-out).');
+    }
+    return localStorage.getItem(OPTOUT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Boot analytics once, on page load. No-op when disabled or opted out. */
 export async function initAnalytics(): Promise<void> {
   if (!analyticsEnabled || typeof window === 'undefined') return;
+  if (isOptedOut()) return; // owner's own device — never track
   const posthog = await loadPostHog();
   posthog.init(KEY as string, {
     api_host: HOST,
@@ -70,7 +93,7 @@ export async function initAnalytics(): Promise<void> {
  * Future use: track('chat_opened'), track('cv_downloaded'), track('project_clicked', { repo }).
  */
 export async function track(event: string, props?: Record<string, unknown>): Promise<void> {
-  if (!analyticsEnabled) return;
+  if (!analyticsEnabled || typeof window === 'undefined' || isOptedOut()) return;
   const posthog = await loadPostHog();
   posthog.capture(event, props);
 }
