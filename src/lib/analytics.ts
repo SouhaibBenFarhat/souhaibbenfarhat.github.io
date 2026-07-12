@@ -24,6 +24,31 @@ function loadPostHog(): Promise<PostHog> {
   return posthogPromise;
 }
 
+// A visitor id that resets each calendar day (UTC): the same person returning the
+// next day is counted as a NEW unique. We mint a random id, store it in localStorage
+// keyed by today's date, and reuse it only while the date matches. PostHog's own
+// persistence is kept in memory so it never overrides this daily id.
+function dailyDistinctId(): string {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  const STORE = 'ph_daily_id';
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}');
+    if (saved.date === today && saved.id) return saved.id as string;
+  } catch {
+    /* localStorage unavailable (private mode) — fall through to a fresh id */
+  }
+  const id =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${today}-${Math.random().toString(36).slice(2)}`;
+  try {
+    localStorage.setItem(STORE, JSON.stringify({ id, date: today }));
+  } catch {
+    /* ignore write failure */
+  }
+  return id;
+}
+
 /** Boot analytics once, on page load. No-op when disabled. */
 export async function initAnalytics(): Promise<void> {
   if (!analyticsEnabled || typeof window === 'undefined') return;
@@ -31,10 +56,11 @@ export async function initAnalytics(): Promise<void> {
   posthog.init(KEY as string, {
     api_host: HOST,
     capture_pageview: true,
-    // Persistent identity → accurate unique-visitor / new-vs-returning counts.
-    // (Was 'memory' i.e. cookieless; switched because uniqueness matters more here
-    // than avoiding a consent banner — this is a personal portfolio.)
-    persistence: 'localStorage+cookie',
+    // Daily-rotating identity (see dailyDistinctId): unique visitors are counted
+    // per calendar day. Memory persistence so PostHog doesn't keep its own long-lived
+    // id; our bootstrapped daily id is the source of truth.
+    persistence: 'memory',
+    bootstrap: { distinctID: dailyDistinctId() },
     person_profiles: 'identified_only',
   });
 }
