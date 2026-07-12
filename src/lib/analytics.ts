@@ -77,7 +77,10 @@ export async function initAnalytics(): Promise<void> {
   if (isOptedOut()) return; // owner's own device — never track
   const posthog = await loadPostHog();
   posthog.init(KEY as string, {
+    // api_host points at our first-party reverse proxy (PUBLIC_POSTHOG_HOST) so
+    // ad-blockers don't drop events; ui_host keeps dashboard/toolbar links on PostHog.
     api_host: HOST,
+    ui_host: 'https://eu.posthog.com',
     capture_pageview: true,
     // Daily-rotating identity (see dailyDistinctId): unique visitors are counted
     // per calendar day. Memory persistence so PostHog doesn't keep its own long-lived
