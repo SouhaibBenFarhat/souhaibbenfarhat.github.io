@@ -19,6 +19,9 @@ const SUGGESTIONS = [
   "What's his experience with AI?",
 ];
 
+const DEFAULT_WIDTH = 460;
+const MIN_WIDTH = 380;
+
 type Message = { role: 'user' | 'assistant'; content: string };
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
@@ -51,6 +54,8 @@ function TypingDots() {
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [resizing, setResizing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<string | null>(null);
@@ -67,11 +72,30 @@ export default function ChatWidget() {
     return () => window.clearTimeout(t);
   }, []);
 
-  // Push the page over (desktop) rather than covering it.
+  // Push the page over (desktop) rather than covering it; the panel width is
+  // shared with the page via a CSS variable.
   useEffect(() => {
     document.body.classList.toggle('sfchat-pushed', open);
+    document.body.style.setProperty('--sfchat-w', `${width}px`);
     return () => document.body.classList.remove('sfchat-pushed');
-  }, [open]);
+  }, [open, width]);
+
+  // Drag-to-resize from the left edge.
+  useEffect(() => {
+    document.body.classList.toggle('sfchat-resizing', resizing);
+    if (!resizing) return;
+    const onMove = (e: PointerEvent) => {
+      const next = window.innerWidth - e.clientX - 16; // 16 = panel's right margin
+      setWidth(Math.min(Math.max(next, MIN_WIDTH), Math.min(860, window.innerWidth - 64)));
+    };
+    const onUp = () => setResizing(false);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [resizing]);
 
   // Type out the welcome message once, shortly after the panel starts opening.
   useEffect(() => {
@@ -168,6 +192,17 @@ export default function ChatWidget() {
       </button>
 
       <aside className={`sfchat-panel ${open ? 'sfchat-open' : ''}`} aria-hidden={!open} aria-label="AI assistant">
+        <div
+          className="sfchat-resize"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            setResizing(true);
+          }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chat"
+        />
+
         <header className="sfchat-head">
           <div className="sfchat-id">
             <span className="sfchat-avatar">✦</span>
@@ -288,8 +323,10 @@ const CSS = `
 /* Push the page over on desktop instead of covering it. */
 @media (min-width: 880px) {
   body { transition: margin-right .44s cubic-bezier(.22,.61,.36,1); }
-  body.sfchat-pushed { margin-right: 428px; }
+  body.sfchat-pushed { margin-right: calc(var(--sfchat-w, 460px) + 32px); }
+  body.sfchat-resizing { transition: none; }
 }
+body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 .sfchat-fab {
   position: fixed; right: 22px; bottom: 22px; z-index: 60;
@@ -304,7 +341,7 @@ const CSS = `
 /* Floating card: detached from the edges, rounded on all sides, elevated. */
 .sfchat-panel {
   position: fixed; top: 16px; right: 16px; bottom: 16px; z-index: 61;
-  width: 396px; max-width: calc(100vw - 32px);
+  width: var(--sfchat-w, 460px); max-width: calc(100vw - 32px);
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--bg);                 /* recessed body surface */
   border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-lg);
@@ -316,6 +353,15 @@ const CSS = `
 @media (max-width: 600px) {
   .sfchat-panel { top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; border-radius: 0; border: none; }
 }
+
+/* Drag handle on the left edge — a rounded pill that appears on hover. */
+.sfchat-resize { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; z-index: 5; cursor: ew-resize; display: grid; place-items: center; }
+.sfchat-resize::before {
+  content: ''; width: 4px; height: 42px; border-radius: 4px; background: var(--line);
+  opacity: 0; transition: opacity .16s ease, background .16s ease, height .16s ease;
+}
+.sfchat-resize:hover::before { opacity: 1; background: var(--accent); height: 56px; }
+@media (max-width: 600px) { .sfchat-resize { display: none; } }
 
 /* Header: an elevated surface raised above the recessed body. */
 .sfchat-head {
@@ -331,7 +377,7 @@ const CSS = `
 @keyframes sfchat-live { 0% { box-shadow: 0 0 0 0 rgba(56,178,106,.5); } 70%,100% { box-shadow: 0 0 0 5px rgba(56,178,106,0); } }
 
 .sfchat-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 14px; background: var(--accent); color: #fff; }
-.sfchat-avatar.sm { width: 24px; height: 24px; font-size: 12px; align-self: flex-end; margin-bottom: 2px; }
+.sfchat-avatar.sm { width: 24px; height: 24px; font-size: 12px; align-self: flex-start; margin-top: 1px; }
 
 .sfchat-min { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; }
 .sfchat-min:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
@@ -339,15 +385,15 @@ const CSS = `
 /* Body: the recessed surface. Bubbles float on it. */
 .sfchat-list { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
 
-.sfchat-row { display: flex; align-items: flex-end; gap: 8px; }
+.sfchat-row { display: flex; align-items: flex-start; gap: 8px; }
 .sfchat-row.user { justify-content: flex-end; }
 .sfchat-enter { animation: sfchat-enter .34s cubic-bezier(.22,.61,.36,1) both; }
 @keyframes sfchat-enter { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 
 /* Bubbles: elevated surfaces (shadow) so they pop off the recessed body. */
 .sfchat-bubble { max-width: 82%; padding: 11px 14px; border-radius: 15px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }
-.sfchat-bubble.assistant { background: var(--surface); box-shadow: var(--shadow-sm); border-bottom-left-radius: 5px; }
-.sfchat-bubble.user { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); border-bottom-right-radius: 5px; }
+.sfchat-bubble.assistant { background: var(--surface); box-shadow: var(--shadow-sm); border-top-left-radius: 5px; }
+.sfchat-bubble.user { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); border-top-right-radius: 5px; }
 .sfchat-bubble a { color: var(--accent); text-decoration: underline; }
 .sfchat-bubble.user a { color: #fff; }
 .sfchat-bubble code { background: color-mix(in srgb, var(--text) 8%, transparent); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
@@ -369,15 +415,15 @@ const CSS = `
 .sfchat-dots span:nth-child(3) { animation-delay: .3s; }
 @keyframes sfchat-bounce { 0%,60%,100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
 
-.sfchat-status { display: flex; align-items: center; gap: 8px; }
-.sfchat-statustext { display: inline-flex; align-items: center; gap: 3px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.sfchat-status { display: flex; align-items: flex-start; gap: 8px; }
+.sfchat-statustext { display: inline-flex; align-items: center; gap: 3px; font-size: 12.5px; color: var(--muted); font-style: italic; padding-top: 3px; }
 .sfchat-statustext i { width: 3px; height: 3px; border-radius: 50%; background: var(--muted); animation: sfchat-bounce 1.2s ease-in-out infinite; }
 .sfchat-statustext i:nth-child(3) { animation-delay: .15s; }
 .sfchat-statustext i:nth-child(4) { animation-delay: .3s; }
 
 /* Floating composer: a larger elevated box on the body — no footer bar. */
 .sfchat-composer-wrap { padding: 14px; flex-shrink: 0; }
-.sfchat-composer { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 6px 6px 6px 6px; transition: border-color .15s ease, box-shadow .15s ease; }
+.sfchat-composer { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 6px; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 .sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 15px; padding: 11px 12px; }
 .sfchat-field::placeholder { color: var(--muted); }
