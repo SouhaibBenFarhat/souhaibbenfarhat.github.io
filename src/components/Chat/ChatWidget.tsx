@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare } from 'lucide-react';
 
 const API = import.meta.env.PUBLIC_CHAT_API ?? 'https://portfolio-backend-2huw.onrender.com';
 
@@ -63,7 +64,16 @@ export default function ChatWidget() {
   const [welcome, setWelcome] = useState('');
   const conversationId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
   const welcomeDone = welcome.length >= WELCOME.length;
+
+  // Auto-grow the composer as lines are added (up to a cap).
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input]);
 
   // Auto-open on every load — start closed, then open so the slide-in animates.
   useEffect(() => {
@@ -97,7 +107,7 @@ export default function ChatWidget() {
     };
   }, [resizing]);
 
-  // Type out the welcome message once, shortly after the panel starts opening.
+  // Show the typing indicator for ~2s, then type out the welcome message once.
   useEffect(() => {
     let i = 0;
     let interval: number | undefined;
@@ -107,7 +117,7 @@ export default function ChatWidget() {
         setWelcome(WELCOME.slice(0, i));
         if (i >= WELCOME.length) window.clearInterval(interval);
       }, 16);
-    }, 480);
+    }, 2000);
     return () => {
       window.clearTimeout(start);
       if (interval) window.clearInterval(interval);
@@ -205,7 +215,7 @@ export default function ChatWidget() {
 
         <header className="sfchat-head">
           <div className="sfchat-id">
-            <span className="sfchat-avatar">✦</span>
+            <span className="sfchat-avatar"><AgentIcon /></span>
             <div>
               <strong>Souhaib’s assistant</strong>
               <span className="sfchat-online">
@@ -220,7 +230,7 @@ export default function ChatWidget() {
 
         <div className="sfchat-list" ref={listRef}>
           <div className="sfchat-row assistant sfchat-enter">
-            <span className="sfchat-avatar sm">✦</span>
+            <span className="sfchat-avatar sm"><AgentIcon /></span>
             <div className="sfchat-bubble assistant">
               {welcome ? (
                 <>
@@ -234,10 +244,12 @@ export default function ChatWidget() {
           </div>
 
           {idle && welcomeDone && (
-            <div className="sfchat-chips sfchat-enter">
+            <div className="sfchat-suggest sfchat-enter">
+              <span className="sfchat-suglabel">Try asking</span>
               {SUGGESTIONS.map((s) => (
                 <button key={s} className="sfchat-chip" onClick={() => send(s)}>
-                  {s}
+                  <span>{s}</span>
+                  <ArrowIcon />
                 </button>
               ))}
             </div>
@@ -245,7 +257,7 @@ export default function ChatWidget() {
 
           {messages.map((m, i) => (
             <div key={i} className={`sfchat-row ${m.role} sfchat-enter`}>
-              {m.role === 'assistant' && <span className="sfchat-avatar sm">✦</span>}
+              {m.role === 'assistant' && <span className="sfchat-avatar sm"><AgentIcon /></span>}
               <div className={`sfchat-bubble ${m.role}`}>
                 {m.role === 'assistant' && i === messages.length - 1 && busy && !m.content ? (
                   <TypingDots />
@@ -260,7 +272,7 @@ export default function ChatWidget() {
 
           {status && (
             <div className="sfchat-status sfchat-enter">
-              <span className="sfchat-avatar sm">✦</span>
+              <span className="sfchat-avatar sm"><AgentIcon /></span>
               <span className="sfchat-statustext">
                 {status}
                 <i />
@@ -279,17 +291,31 @@ export default function ChatWidget() {
           }}
         >
           <div className="sfchat-composer">
-            <input
-              className="sfchat-field"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about Souhaib…"
-              aria-label="Your message"
-              disabled={busy}
-            />
-            <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
-              <SendIcon />
-            </button>
+            <div className="sfchat-composer-row">
+              <textarea
+                ref={fieldRef}
+                className="sfchat-field"
+                value={input}
+                rows={1}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    send(input);
+                  }
+                }}
+                placeholder="Ask about Souhaib…"
+                aria-label="Your message"
+                disabled={busy}
+              />
+              <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
+                <SendIcon />
+              </button>
+            </div>
+            <p className="sfchat-note">
+              <Info size={12} strokeWidth={2} />
+              This assistant is rate-limited to keep it free.
+            </p>
           </div>
         </form>
       </aside>
@@ -298,25 +324,19 @@ export default function ChatWidget() {
 }
 
 function ChatIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
+  return <MessageSquare size={24} strokeWidth={2} />;
 }
 function MinIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
+  return <ChevronDown size={18} strokeWidth={2} />;
 }
 function SendIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
-    </svg>
-  );
+  return <ArrowUp size={18} strokeWidth={2.25} />;
+}
+function ArrowIcon() {
+  return <ArrowUpRight size={14} strokeWidth={2} />;
+}
+function AgentIcon() {
+  return <Bot size={16} strokeWidth={2} />;
 }
 
 const CSS = `
@@ -368,7 +388,7 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
   position: relative; z-index: 2; flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
   padding: 15px 18px;
-  background: var(--surface); box-shadow: var(--shadow-sm);
+  background: color-mix(in srgb, var(--surface), #fff 9%); box-shadow: var(--shadow-sm);
 }
 .sfchat-id { display: flex; align-items: center; gap: 11px; }
 .sfchat-id strong { display: block; font-size: 14.5px; letter-spacing: -.01em; }
@@ -377,7 +397,7 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 @keyframes sfchat-live { 0% { box-shadow: 0 0 0 0 rgba(56,178,106,.5); } 70%,100% { box-shadow: 0 0 0 5px rgba(56,178,106,0); } }
 
 .sfchat-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 14px; background: var(--accent); color: #fff; }
-.sfchat-avatar.sm { width: 24px; height: 24px; font-size: 12px; align-self: flex-start; margin-top: 1px; }
+.sfchat-avatar.sm { width: 24px; height: 24px; font-size: 12px; align-self: flex-start; margin-top: 1px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); }
 
 .sfchat-min { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; }
 .sfchat-min:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
@@ -392,7 +412,7 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 /* Bubbles: elevated surfaces (shadow) so they pop off the recessed body. */
 .sfchat-bubble { max-width: 82%; padding: 11px 14px; border-radius: 15px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-wrap: break-word; }
-.sfchat-bubble.assistant { background: var(--surface); box-shadow: var(--shadow-sm); border-top-left-radius: 5px; }
+.sfchat-bubble.assistant { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); border-top-left-radius: 5px; }
 .sfchat-bubble.user { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); border-top-right-radius: 5px; }
 .sfchat-bubble a { color: var(--accent); text-decoration: underline; }
 .sfchat-bubble.user a { color: #fff; }
@@ -405,9 +425,17 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }
 
-.sfchat-chips { display: flex; flex-direction: column; gap: 8px; padding-left: 32px; }
-.sfchat-chip { text-align: left; background: var(--surface); color: var(--text); cursor: pointer; border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; font-size: 13px; box-shadow: var(--shadow-sm); transition: border-color .18s ease, transform .12s ease; }
-.sfchat-chip:hover { border-color: var(--accent); transform: translateX(2px); }
+.sfchat-suggest { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding-left: 32px; }
+.sfchat-suglabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 3px; padding-left: 2px; }
+.sfchat-chip {
+  display: inline-flex; align-items: center; gap: 9px; max-width: 100%;
+  text-align: left; background: transparent; color: var(--text); cursor: pointer;
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 13px;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+.sfchat-chip svg { color: var(--muted); flex-shrink: 0; transition: transform .16s ease, color .16s ease; }
+.sfchat-chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--accent); }
+.sfchat-chip:hover svg { color: var(--accent); transform: translate(2px, -2px); }
 
 .sfchat-dots { display: inline-flex; gap: 4px; align-items: center; padding: 2px 0; }
 .sfchat-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: sfchat-bounce 1.2s ease-in-out infinite; }
@@ -423,10 +451,13 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 /* Floating composer: a larger elevated box on the body — no footer bar. */
 .sfchat-composer-wrap { padding: 14px; flex-shrink: 0; }
-.sfchat-composer { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 6px; transition: border-color .15s ease, box-shadow .15s ease; }
+.sfchat-composer { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 8px 8px 0; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
-.sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 15px; padding: 11px 12px; }
+.sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
+.sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 15px; line-height: 1.5; padding: 16px 12px; resize: none; overflow-y: auto; min-height: 64px; max-height: 150px; }
 .sfchat-field::placeholder { color: var(--muted); }
+.sfchat-note { display: flex; align-items: center; gap: 5px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.sfchat-note svg { flex-shrink: 0; opacity: .8; }
 .sfchat-send { width: 42px; height: 42px; flex-shrink: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center; transition: opacity .15s ease, transform .12s ease; }
 .sfchat-send:hover:not(:disabled) { transform: scale(1.05); }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
