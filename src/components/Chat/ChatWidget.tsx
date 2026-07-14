@@ -33,6 +33,10 @@ const REVEAL_CPS = 40; // baseline reveal speed (chars/sec) — lower feels slow
 const REVEAL_CATCHUP = 1.6; // extra chars/sec per buffered char, to catch up when behind
 const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smoothly, not instantly
 
+// Keep the restore skeleton on screen for at least this long, so a fast backend
+// response doesn't flash the skeleton for a split second (which looks worse than none).
+const MIN_SKELETON_MS = 1000;
+
 type Message = { role: 'user' | 'assistant'; content: string };
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
@@ -154,6 +158,7 @@ function ChatPanel() {
     conversationId.current = id;
     if (!id) return; // fresh session — the welcome is already armed
     let cancelled = false;
+    const startedAt = performance.now();
 
     const forget = () => {
       try {
@@ -166,19 +171,22 @@ function ChatPanel() {
     };
 
     (async () => {
+      let restored: Message[] = [];
       try {
         const res = await fetch(`${API}/chat/conversations/${id}/`);
         if (!res.ok) throw new Error('gone');
         const data = await res.json();
-        if (cancelled) return;
-        const restored: Message[] = Array.isArray(data.messages) ? data.messages : [];
-        if (restored.length) setMessages(restored);
-        else forget();
+        restored = Array.isArray(data.messages) ? data.messages : [];
       } catch {
-        if (!cancelled) forget();
-      } finally {
-        if (!cancelled) setLoadingHistory(false);
+        restored = [];
       }
+      // Hold the skeleton for a minimum time so a fast response doesn't flash it.
+      const remaining = MIN_SKELETON_MS - (performance.now() - startedAt);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (cancelled) return;
+      if (restored.length) setMessages(restored);
+      else forget();
+      setLoadingHistory(false);
     })();
 
     return () => {
