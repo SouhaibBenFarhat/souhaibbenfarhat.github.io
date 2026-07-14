@@ -13,9 +13,18 @@ const year = 2026;
       <a class="link-underline" href={`mailto:${profile.email}`}>Email</a>
       <a class="link-underline" href={profile.links.linkedin} target="_blank" rel="noopener">LinkedIn</a>
       <a class="link-underline" href={profile.cv} download>CV</a>
+      <a class="link-underline" href="/privacy">Privacy</a>
+      <button type="button" data-cookie-settings class="cookie-settings-link link-underline">Cookie settings</button>
     </div>
   </div>
   <div class="wrap pb-10">
     <p class="text-xs text-muted">© {year} {profile.name}</p>
   </div>
 </footer>
+
+{/* Reopen the consent banner (the React island reveals this control via `.sf-consent-ready`) */}
+<script is:inline>
+  document
+    .querySelector('[data-cookie-settings]')
+    ?.addEventListener('click', () => window.dispatchEvent(new CustomEvent('sf-consent:open')));
+</script>

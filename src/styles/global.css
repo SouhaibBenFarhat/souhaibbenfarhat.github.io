@@ -117,6 +117,18 @@ a { color: inherit; text-decoration: none; }
   .hr { @apply border-0 border-t border-line; }
 }
 
+/* "Cookie settings" footer control: hidden until the consent island marks itself live
+   (i.e. analytics is enabled and this isn't the owner's device). Styled as a text link. */
+.cookie-settings-link {
+  display: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.sf-consent-ready .cookie-settings-link { display: inline-block; }
+
 /* ---- Scroll reveal ---------------------------------------------------- */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
 .reveal.in { opacity: 1; transform: none; }
