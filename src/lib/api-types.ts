@@ -38,7 +38,11 @@ export interface paths {
         get: operations["chat_conversations_retrieve"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a conversation
+         * @description Permanently delete a conversation and all its messages. The client should also drop its stored conversation id. Possessing the UUID is the check.
+         */
+        delete: operations["chat_conversations_destroy"];
         options?: never;
         head?: never;
         patch?: never;
@@ -236,6 +240,33 @@ export interface operations {
                 };
             };
             /** @description Unknown or expired conversation — start fresh. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    chat_conversations_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown conversation. */
             404: {
                 headers: {
                     [name: string]: unknown;
