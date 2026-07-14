@@ -25,6 +25,14 @@ const SUGGESTIONS = [
 const DEFAULT_WIDTH = 460;
 const MIN_WIDTH = 380;
 
+// Smooth streaming: instead of painting each network burst instantly, buffer the
+// incoming tokens and reveal them character-by-character at a steady pace. The rate
+// speeds up as the buffer grows (so the display never lags far behind), capped so a
+// large already-finished response doesn't blast out at once. Tune REVEAL_CPS to taste.
+const REVEAL_CPS = 40; // baseline reveal speed (chars/sec) — lower feels slower
+const REVEAL_CATCHUP = 1.6; // extra chars/sec per buffered char, to catch up when behind
+const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smoothly, not instantly
+
 type Message = { role: 'user' | 'assistant'; content: string };
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
@@ -76,7 +84,13 @@ function ChatPanel() {
   const conversationId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const revealRaf = useRef<number | null>(null);
   const welcomeDone = welcome.length >= WELCOME.length;
+
+  // Stop the reveal loop if the widget unmounts mid-stream.
+  useEffect(() => () => {
+    if (revealRaf.current != null) cancelAnimationFrame(revealRaf.current);
+  }, []);
 
   // Auto-grow the composer as lines are added (up to a cap).
   useEffect(() => {
@@ -136,8 +150,14 @@ function ChatPanel() {
   }, []);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, status, welcome, open]);
+    // While streaming, the text grows a few chars per frame — an instant scroll pins
+    // to the bottom and reads as one continuous glide. Smooth-scrolling here would
+    // restart its animation every frame and stutter. Use smooth only for one-off jumps.
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: busy ? 'auto' : 'smooth',
+    });
+  }, [messages, status, welcome, open, busy]);
 
   async function send(text: string) {
     text = text.trim();
@@ -153,6 +173,49 @@ function ChatPanel() {
         copy[copy.length - 1] = { role: 'assistant', content: updater(copy[copy.length - 1].content) };
         return copy;
       });
+
+    // --- Smooth reveal: buffer incoming tokens and paint them at a steady pace ---
+    let pending = ''; // tokens received but not yet shown on screen
+    let netDone = false; // the network stream has finished
+    let carry = 0; // fractional-character accumulator across frames
+    let lastTick = 0;
+
+    const finish = () => {
+      revealRaf.current = null;
+      setBusy(false);
+      setStatus(null);
+    };
+
+    const drain = (now: number) => {
+      if (!lastTick) lastTick = now;
+      const dt = Math.min((now - lastTick) / 1000, 0.05); // clamp long gaps (tab switches)
+      lastTick = now;
+      if (pending.length) {
+        const cps = Math.min(REVEAL_MAX_CPS, REVEAL_CPS + pending.length * REVEAL_CATCHUP);
+        carry += cps * dt;
+        const n = Math.floor(carry);
+        if (n > 0) {
+          carry -= n;
+          const chunk = pending.slice(0, n);
+          pending = pending.slice(n);
+          setLastAssistant((prev) => prev + chunk);
+        }
+      }
+      if (pending.length) {
+        revealRaf.current = requestAnimationFrame(drain);
+      } else if (netDone) {
+        finish(); // fully caught up and the stream is over
+      } else {
+        revealRaf.current = null; // idle until the next token arrives
+      }
+    };
+
+    const ensureDraining = () => {
+      if (revealRaf.current == null) {
+        lastTick = 0;
+        revealRaf.current = requestAnimationFrame(drain);
+      }
+    };
 
     const requestBody = JSON.stringify({ message: text, conversation_id: conversationId.current });
 
@@ -209,17 +272,25 @@ function ChatPanel() {
           if (data.tool && data.status === 'end') setStatus('writing');
           if (data.text) {
             setStatus(null);
-            setLastAssistant((prev) => prev + data.text);
+            pending += data.text; // reveal loop paints it at a steady pace
+            ensureDraining();
           }
-          if (data.error) setLastAssistant(() => '⚠️ Sorry — I couldn’t answer that. Please try again.');
+          if (data.error) {
+            pending = '';
+            setLastAssistant(() => '⚠️ Sorry — I couldn’t answer that. Please try again.');
+          }
         }
       }
+      netDone = true;
+      ensureDraining(); // flush whatever's left, then finish()
     } catch (err) {
+      if (revealRaf.current != null) {
+        cancelAnimationFrame(revealRaf.current);
+        revealRaf.current = null;
+      }
       const msg = err instanceof Error ? err.message : 'Something went wrong.';
       setLastAssistant(() => '⚠️ ' + msg);
-    } finally {
-      setBusy(false);
-      setStatus(null);
+      finish();
     }
   }
 
