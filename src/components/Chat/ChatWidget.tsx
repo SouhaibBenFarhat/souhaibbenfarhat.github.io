@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare } from 'lucide-react';
 
+import { isInternal } from '../../lib/internal';
+
 const API = import.meta.env.PUBLIC_CHAT_API ?? 'https://portfolio-backend-2huw.onrender.com';
 
 const TOOL_LABELS: Record<string, string> = {
@@ -53,7 +55,16 @@ function TypingDots() {
   );
 }
 
+// The AI chat isn't ready for the public yet, so it's gated behind internal/owner mode
+// (visit once with `?internal=1`). The panel — with all its hooks and body-shifting
+// side effects — only mounts for internal browsers; everyone else renders nothing.
 export default function ChatWidget() {
+  const [internal, setInternal] = useState(false);
+  useEffect(() => setInternal(isInternal()), []);
+  return internal ? <ChatPanel /> : null;
+}
+
+function ChatPanel() {
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
@@ -143,14 +154,39 @@ export default function ChatWidget() {
         return copy;
       });
 
+    const requestBody = JSON.stringify({ message: text, conversation_id: conversationId.current });
+
+    // The free-tier backend sleeps; a cold start returns 502/503 (with no CORS
+    // headers, so the browser reports it as a CORS/network error). Retry while it wakes.
+    const openStream = async () => {
+      const maxAttempts = 6;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const res = await fetch(`${API}/chat/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: requestBody,
+          });
+          if ([502, 503, 504].includes(res.status) && attempt < maxAttempts) {
+            setStatus('waking the assistant up…');
+            await new Promise((r) => setTimeout(r, 6000));
+            continue;
+          }
+          return res;
+        } catch (e) {
+          if (attempt >= maxAttempts) throw e;
+          setStatus('waking the assistant up…');
+          await new Promise((r) => setTimeout(r, 6000));
+        }
+      }
+      throw new Error('unreachable');
+    };
+
     try {
-      const res = await fetch(`${API}/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, conversation_id: conversationId.current }),
-      });
+      const res = await openStream();
       if (res.status === 429) throw new Error('You’re sending messages too fast — give it a moment.');
       if (!res.ok || !res.body) throw new Error('Sorry, I’m having trouble right now.');
+      setStatus('thinking');
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

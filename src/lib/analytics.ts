@@ -10,6 +10,8 @@
 
 import type { PostHog } from 'posthog-js';
 
+import { isInternal } from './internal';
+
 const KEY = import.meta.env.PUBLIC_POSTHOG_KEY;
 const HOST = import.meta.env.PUBLIC_POSTHOG_HOST ?? 'https://eu.i.posthog.com';
 
@@ -42,32 +44,14 @@ function resetIfNewDay(posthog: PostHog): void {
   }
 }
 
-// Owner opt-out: visiting the site once with `?internal=1` permanently excludes THIS
-// browser from analytics (a flag is stored locally). Afterwards, normal visits send
-// nothing — no query param needed. Set once per device; lasts until browser storage
-// is cleared.
-const OPTOUT_KEY = 'ph_optout';
-function isOptedOut(): boolean {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('internal') === '1') {
-      localStorage.setItem(OPTOUT_KEY, '1');
-      // Strip the flag from the address bar so the URL isn't accidentally shared/bookmarked.
-      const url = new URL(window.location.href);
-      url.searchParams.delete('internal');
-      history.replaceState({}, '', url);
-      console.info('[analytics] This browser is now excluded from analytics (owner opt-out).');
-    }
-    return localStorage.getItem(OPTOUT_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
+// Owner opt-out: a browser in internal/owner mode (visited once with `?internal=1`)
+// is excluded from analytics. The flag lives in the shared `isInternal()` helper, so
+// the same visit that reveals internal features also opts the owner out of tracking.
 
 /** Boot analytics once, on page load. No-op when disabled or opted out. */
 export async function initAnalytics(): Promise<void> {
   if (!analyticsEnabled || typeof window === 'undefined') return;
-  if (isOptedOut()) return; // owner's own device — never track
+  if (isInternal()) return; // owner's own device — never track
   const posthog = await loadPostHog();
   posthog.init(KEY as string, {
     // api_host points at our first-party reverse proxy (PUBLIC_POSTHOG_HOST) so
@@ -91,7 +75,7 @@ export async function initAnalytics(): Promise<void> {
  * Future use: track('chat_opened'), track('cv_downloaded'), track('project_clicked', { repo }).
  */
 export async function track(event: string, props?: Record<string, unknown>): Promise<void> {
-  if (!analyticsEnabled || typeof window === 'undefined' || isOptedOut()) return;
+  if (!analyticsEnabled || typeof window === 'undefined' || isInternal()) return;
   const posthog = await loadPostHog();
   posthog.capture(event, props);
 }
