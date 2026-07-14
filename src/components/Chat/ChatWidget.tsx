@@ -33,6 +33,10 @@ const REVEAL_CPS = 40; // baseline reveal speed (chars/sec) — lower feels slow
 const REVEAL_CATCHUP = 1.6; // extra chars/sec per buffered char, to catch up when behind
 const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smoothly, not instantly
 
+// Keep the restore skeleton on screen for at least this long, so a fast backend
+// response doesn't flash the skeleton for a split second (which looks worse than none).
+const MIN_SKELETON_MS = 1000;
+
 type Message = { role: 'user' | 'assistant'; content: string };
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
@@ -63,6 +67,42 @@ function TypingDots() {
   );
 }
 
+const CONV_KEY = 'chat_conversation_id';
+function storedConversationId(): string | null {
+  try {
+    return typeof window !== 'undefined' ? localStorage.getItem(CONV_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Placeholder bubbles shown while a prior conversation is fetched, so the panel never
+// flashes blank and the layout doesn't jump when the messages arrive. Pulse (opacity)
+// rather than a moving gradient, to stay within the site's minimalist tokens.
+function ChatSkeleton() {
+  const rows = [
+    { role: 'assistant', lines: 3 },
+    { role: 'user', lines: 1 },
+    { role: 'assistant', lines: 2 },
+    { role: 'user', lines: 2 },
+    { role: 'assistant', lines: 3 },
+  ];
+  return (
+    <div className="sfchat-skel" aria-hidden="true">
+      {rows.map((r, i) => (
+        <div key={i} className={`sfchat-row ${r.role}`}>
+          {r.role === 'assistant' && <span className="sfchat-avatar sm sfchat-skel-dot" />}
+          <div className={`sfchat-skel-bubble ${r.role}`}>
+            {Array.from({ length: r.lines }).map((_, j) => (
+              <span key={j} className="sfchat-skel-line" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // The AI chat isn't ready for the public yet, so it's gated behind internal/owner mode
 // (visit once with `?internal=1`). The panel — with all its hooks and body-shifting
 // side effects — only mounts for internal browsers; everyone else renders nothing.
@@ -81,6 +121,10 @@ function ChatPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [welcome, setWelcome] = useState('');
+  // If a prior conversation id is stored, start in the loading state (skeleton) and
+  // hold the welcome; otherwise it's a fresh session and the welcome is armed.
+  const [loadingHistory, setLoadingHistory] = useState(() => storedConversationId() != null);
+  const [welcomeArmed, setWelcomeArmed] = useState(() => storedConversationId() == null);
   const conversationId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
@@ -102,9 +146,52 @@ function ChatPanel() {
 
   // Auto-open on every load — start closed, then open so the slide-in animates.
   useEffect(() => {
-    conversationId.current = localStorage.getItem('chat_conversation_id');
     const t = window.setTimeout(() => setOpen(true), 140);
     return () => window.clearTimeout(t);
+  }, []);
+
+  // Restore a prior conversation from the backend so it survives a reload. A skeleton
+  // shows while the fetch is in flight (no blank flash, no layout jump). A 404 or any
+  // failure means the thread is gone (e.g. the free DB was reset) → start fresh.
+  useEffect(() => {
+    const id = storedConversationId();
+    conversationId.current = id;
+    if (!id) return; // fresh session — the welcome is already armed
+    let cancelled = false;
+    const startedAt = performance.now();
+
+    const forget = () => {
+      try {
+        localStorage.removeItem(CONV_KEY);
+      } catch {
+        /* ignore */
+      }
+      conversationId.current = null;
+      setWelcomeArmed(true); // nothing to restore → greet as a fresh chat
+    };
+
+    (async () => {
+      let restored: Message[] = [];
+      try {
+        const res = await fetch(`${API}/chat/conversations/${id}/`);
+        if (!res.ok) throw new Error('gone');
+        const data = await res.json();
+        restored = Array.isArray(data.messages) ? data.messages : [];
+      } catch {
+        restored = [];
+      }
+      // Hold the skeleton for a minimum time so a fast response doesn't flash it.
+      const remaining = MIN_SKELETON_MS - (performance.now() - startedAt);
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (cancelled) return;
+      if (restored.length) setMessages(restored);
+      else forget();
+      setLoadingHistory(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Push the page over (desktop) rather than covering it; the panel width is
@@ -132,8 +219,10 @@ function ChatPanel() {
     };
   }, [resizing]);
 
-  // Show the typing indicator for ~2s, then type out the welcome message once.
+  // Show the typing indicator for ~2s, then type out the welcome message once — but
+  // only for a fresh chat. A restored conversation shows its history, not the greeting.
   useEffect(() => {
+    if (!welcomeArmed) return;
     let i = 0;
     let interval: number | undefined;
     const start = window.setTimeout(() => {
@@ -147,7 +236,7 @@ function ChatPanel() {
       window.clearTimeout(start);
       if (interval) window.clearInterval(interval);
     };
-  }, []);
+  }, [welcomeArmed]);
 
   useEffect(() => {
     // While streaming, the text grows a few chars per frame — an instant scroll pins
@@ -336,21 +425,25 @@ function ChatPanel() {
         </header>
 
         <div className="sfchat-list" ref={listRef}>
-          <div className="sfchat-row assistant sfchat-enter">
-            <span className="sfchat-avatar sm"><AgentIcon /></span>
-            <div className="sfchat-bubble assistant">
-              {welcome ? (
-                <>
-                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(welcome) }} />
-                  {!welcomeDone && <span className="sfchat-caret" />}
-                </>
-              ) : (
-                <TypingDots />
-              )}
-            </div>
-          </div>
+          {loadingHistory && <ChatSkeleton />}
 
-          {idle && welcomeDone && (
+          {!loadingHistory && welcomeArmed && (
+            <div className="sfchat-row assistant sfchat-enter">
+              <span className="sfchat-avatar sm"><AgentIcon /></span>
+              <div className="sfchat-bubble assistant">
+                {welcome ? (
+                  <>
+                    <span dangerouslySetInnerHTML={{ __html: renderMarkdown(welcome) }} />
+                    {!welcomeDone && <span className="sfchat-caret" />}
+                  </>
+                ) : (
+                  <TypingDots />
+                )}
+              </div>
+            </div>
+          )}
+
+          {!loadingHistory && idle && welcomeArmed && welcomeDone && (
             <div className="sfchat-suggest sfchat-enter">
               <span className="sfchat-suglabel">Try asking</span>
               {SUGGESTIONS.map((s) => (
@@ -362,7 +455,8 @@ function ChatPanel() {
             </div>
           )}
 
-          {messages.map((m, i) => (
+          {!loadingHistory &&
+            messages.map((m, i) => (
             <div key={i} className={`sfchat-row ${m.role} sfchat-enter`}>
               {m.role === 'assistant' && <span className="sfchat-avatar sm"><AgentIcon /></span>}
               <div className={`sfchat-bubble ${m.role}`}>
@@ -531,6 +625,18 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }
+
+/* Restore skeleton: neutral placeholder bubbles, pulsing (no gradients). */
+.sfchat-skel { display: flex; flex-direction: column; gap: 14px; }
+.sfchat-skel-dot { background: color-mix(in srgb, var(--text) 8%, transparent); animation: sfchat-pulse 1.5s ease-in-out infinite; }
+.sfchat-skel-bubble { padding: 12px 14px; border-radius: 15px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.sfchat-skel-bubble.assistant { width: min(78%, 300px); border-top-left-radius: 5px; }
+.sfchat-skel-bubble.user { width: min(46%, 190px); border-top-right-radius: 5px; }
+.sfchat-skel-line { height: 9px; border-radius: 5px; background: color-mix(in srgb, var(--text) 12%, transparent); animation: sfchat-pulse 1.5s ease-in-out infinite; }
+.sfchat-skel-line:nth-child(2) { animation-delay: .15s; }
+.sfchat-skel-line:nth-child(3) { animation-delay: .3s; }
+.sfchat-skel-line:last-child { width: 65%; }
+@keyframes sfchat-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
 .sfchat-suggest { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding-left: 32px; }
 .sfchat-suglabel { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 3px; padding-left: 2px; }
