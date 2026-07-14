@@ -3,6 +3,7 @@ import '../styles/global.css';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import ChatWidget from '../components/Chat/ChatWidget.tsx';
+import CookieBanner from '../components/CookieBanner.tsx';
 import { profile } from '../data/site';
 
 interface Props { title?: string; description?: string; }
@@ -104,7 +105,10 @@ const personSchema = {
     {/* AI chat assistant — a React island; hydrates when the browser is idle */}
     <ChatWidget client:idle />
 
-    {/* Analytics — boots only in the CI/production build (env-gated in analytics.ts) */}
+    {/* Cookie consent — client-only React island; only shown when analytics is live */}
+    <CookieBanner client:only="react" />
+
+    {/* Analytics — env-gated AND consent-gated: boots only after the visitor accepts */}
     <script>
       import { initAnalytics } from '../lib/analytics';
       initAnalytics();

@@ -1,0 +1,127 @@
+---
+import Base from '../layouts/Base.astro';
+import { profile } from '../data/site';
+
+const updated = 'July 14, 2026';
+---
+<Base
+  title="Privacy & cookies"
+  description="How this site handles data and cookies — privacy-friendly, EU-hosted analytics used only with your consent."
+>
+  <section class="scroll-mt-24">
+    <div class="wrap max-w-prose pb-16 pt-20 sm:pt-28">
+      <p class="label">Privacy</p>
+      <h1 class="mt-4 font-display text-4xl leading-tight tracking-tight sm:text-5xl">
+        Privacy &amp; cookies
+      </h1>
+      <p class="mt-4 text-sm text-muted">Last updated {updated}</p>
+
+      <div class="mt-10 space-y-10 text-[0.98rem] leading-relaxed text-muted">
+        <p>
+          This is my personal portfolio. I keep data collection to a minimum and I never sell,
+          share, or trade your data. There are no advertising cookies and no third-party marketing
+          trackers on this site.
+        </p>
+
+        <div>
+          <h2 class="font-display text-2xl leading-tight tracking-tight text-ink">What I collect</h2>
+          <p class="mt-4">
+            If — and only if — you accept in the cookie banner, I use
+            <a class="link-underline" href="https://posthog.com/privacy" target="_blank" rel="noopener">PostHog</a>,
+            a privacy-friendly, EU-hosted product-analytics tool, to understand how the site is used
+            (for example: pages viewed, clicks, and anonymous session recordings of interactions with
+            the page). This helps me improve the site. The data is:
+          </p>
+          <ul class="mt-4 space-y-2.5">
+            {[
+              'Pseudonymous — tied to a random id, not to your name or account. There is no login.',
+              'Reset daily, so returning visitors are counted fresh rather than tracked over time.',
+              'Hosted in the EU and processed only by PostHog as my processor — never sold or shared for ads.',
+            ].map((t) => (
+              <li class="flex gap-3">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+          <p class="mt-4">
+            If you decline, no analytics script is loaded and no analytics cookies are set — nothing
+            is tracked at all.
+          </p>
+        </div>
+
+        <div>
+          <h2 class="font-display text-2xl leading-tight tracking-tight text-ink">The AI assistant</h2>
+          <p class="mt-4">
+            This site has an AI assistant you can chat with to ask about my background. It runs on
+            <strong class="text-ink">my own backend</strong> — not a third-party chat service. If you
+            choose to use it:
+          </p>
+          <ul class="mt-4 space-y-2.5">
+            {[
+              'Your messages are sent to my backend and routed through an LLM gateway (LiteLLM) to the model providers that generate the reply — currently Google (Gemini) and Mistral AI. Your text is processed by them only to produce an answer.',
+              'Your conversation is stored on my backend so the thread survives a reload, with a conversation id kept in your browser to reconnect you to it.',
+              'No accounts and no profiling — the assistant only answers questions about me. Conversations are never used for advertising and never sold.',
+              'You can delete a conversation at any time. When you do, it is permanently and completely removed from the backend — not archived, not hidden, not kept as a backup.',
+            ].map((t) => (
+              <li class="flex gap-3">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+          <p class="mt-4">
+            The basis for this is providing the feature you chose to use (GDPR Art. 6(1)(b)) — so,
+            unlike analytics, it is not gated by the cookie banner.
+          </p>
+        </div>
+
+        <div>
+          <h2 class="font-display text-2xl leading-tight tracking-tight text-ink">
+            Strictly necessary storage
+          </h2>
+          <p class="mt-4">
+            A few small values are stored in your browser to make the site work. These are not used
+            for tracking and need no consent:
+          </p>
+          <ul class="mt-4 space-y-2.5">
+            {[
+              'Your cookie choice itself, so the banner does not ask again on every visit.',
+              'Your light/dark theme preference.',
+            ].map((t) => (
+              <li class="flex gap-3">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"></span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h2 class="font-display text-2xl leading-tight tracking-tight text-ink">
+            Your choice &amp; your rights
+          </h2>
+          <p class="mt-4">
+            The legal basis for analytics is your consent (GDPR Art. 6(1)(a)). You can change or
+            withdraw it at any time via <strong class="text-ink">Cookie settings</strong> in the footer,
+            or by clearing this site's data in your browser — withdrawing is as easy as giving consent.
+            Under the GDPR you also have the right to access, correct, or erase your data, and to lodge
+            a complaint with a supervisory authority.
+          </p>
+        </div>
+
+        <div>
+          <h2 class="font-display text-2xl leading-tight tracking-tight text-ink">Contact</h2>
+          <p class="mt-4">
+            Questions about privacy? Email me at
+            <a class="link-underline" href={`mailto:${profile.email}`}>{profile.email}</a>.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-14">
+        <a href="/" class="btn">← Back to home</a>
+      </div>
+    </div>
+  </section>
+</Base>
