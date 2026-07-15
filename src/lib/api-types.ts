@@ -101,7 +101,7 @@ export interface paths {
          * Stream an assistant reply (Server-Sent Events)
          * @description Runs the LangGraph agent and streams its reply as `text/event-stream`.
          *
-         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
+         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
          */
         post: operations["chat_stream_create"];
         delete?: never;
@@ -114,6 +114,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description The context-gauge figures for a conversation. */
+        ChatUsage: {
+            /** @description Tokens the model read on the last turn — the thread's whole prompt (persona + history + tool results), not a running total. */
+            context_tokens: number;
+            /** @description The thread's token budget. */
+            context_limit: number;
+            /** @description True once the budget is spent: further messages are refused with a 403. */
+            exhausted: boolean;
+        };
         /** @description The stored conversation returned by the restore endpoint. */
         ConversationRestore: {
             /**
@@ -123,6 +132,8 @@ export interface components {
             id: string;
             /** @description Turns oldest-first. */
             messages: components["schemas"]["Message"][];
+            /** @description Rebuilds the context gauge after a reload. */
+            usage: components["schemas"]["ChatUsage"];
         };
         Health: {
             /** @description Always "ok" when the service is live. */
@@ -181,6 +192,10 @@ export interface components {
             /** @enum {string} */
             status: "start" | "end";
         };
+        /** @description How full the thread's context is, for the client's gauge. Sent once, just before the done frame, and omitted when the provider reported no usage. */
+        ChatUsageFrame: {
+            usage: components["schemas"]["ChatUsage"];
+        };
         /** @description Sent only if every model failed before any text streamed. */
         ChatErrorFrame: {
             error: string;
@@ -191,7 +206,7 @@ export interface components {
             done: true;
         };
         /** @description One Server-Sent Events frame. Each `data:` line is one of these. */
-        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
+        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
     };
     responses: never;
     parameters: never;
@@ -337,6 +352,13 @@ export interface operations {
             };
             /** @description Missing/too-long message, or an invalid JSON body. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The conversation spent its context budget. Start a new chat; the body carries the final `usage` figures. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
