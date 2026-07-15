@@ -12,6 +12,7 @@
   --accent: #1f6f78;      /* restrained petrol/teal */
   --accent-ink: #0e4a51;
   --danger: #c1372b;      /* destructive actions only */
+  --warn: #9a6700;        /* a limit being approached — not an error */
   --shadow-sm: 0 1px 2px rgba(22,24,29,.04), 0 1px 3px rgba(22,24,29,.06);
   --shadow-md: 0 2px 4px rgba(22,24,29,.05), 0 6px 16px rgba(22,24,29,.08);
   --shadow-lg: 0 8px 24px rgba(22,24,29,.10), 0 2px 6px rgba(22,24,29,.06);
@@ -26,6 +27,7 @@
   --accent: #5cb6be;
   --accent-ink: #aee3e7;
   --danger: #e5675a;
+  --warn: #e3b341;
   --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
   --shadow-md: 0 4px 14px rgba(0,0,0,.5);
   --shadow-lg: 0 10px 30px rgba(0,0,0,.6);

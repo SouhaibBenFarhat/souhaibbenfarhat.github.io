@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
 import { createQueryClient } from '../../lib/queries/client';
-import { useConversation, type Message } from '../../lib/queries/useConversation';
+import { useConversation, type ChatUsage, type Message } from '../../lib/queries/useConversation';
 import { useDeleteConversation } from '../../lib/queries/useDeleteConversation';
 
 const TOOL_LABELS: Record<string, string> = {
@@ -35,6 +35,10 @@ const MIN_WIDTH = 380;
 const REVEAL_CPS = 40; // baseline reveal speed (chars/sec) — lower feels slower
 const REVEAL_CATCHUP = 1.6; // extra chars/sec per buffered char, to catch up when behind
 const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smoothly, not instantly
+
+// The gauge stays visually neutral until the thread is this full, then warms. The only
+// moment the number matters is the one before the chat stops.
+const WARM_AT_PCT = 80;
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
 function escapeHtml(s: string): string {
@@ -100,6 +104,63 @@ function ChatSkeleton() {
   );
 }
 
+/** 940 → "940", 4200 → "4.2k", 20000 → "20k". */
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  const k = n / 1000;
+  return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+}
+
+// How full the thread's context is. The whole conversation is resent on every turn, so a
+// long thread costs more each time and eventually hits its budget — this is the warning
+// before that happens, not a spend or a quota (hence "memory", never "tokens remaining").
+//
+// The denominator is the backend's per-thread budget, not the model's window: against a
+// 131k window the bar would sit near-empty forever and read as broken.
+//
+// Always on screen, so the composer's footer doesn't reflow when the first figures land.
+// Until they do, the track sits empty with no numbers: the limit is the backend's to report
+// (it's env-tunable), so there is nothing honest to print yet — an empty bar says "not
+// measured", a "0 / 20k" would be an invention.
+//
+// The bar alone can't say what it measures, so it carries a tooltip on hover/focus: what
+// the number means, and the exact figures the abbreviated label rounds off. A native
+// `title` would be slower, unstyled, and invisible to keyboard users.
+function ContextGauge({ usage }: { usage: ChatUsage | null }) {
+  const tipId = useId();
+  const used = usage?.context_tokens ?? 0;
+  const limit = usage?.context_limit ?? 0;
+  const known = usage != null && limit > 0;
+  const pct = known ? Math.min(100, (used / limit) * 100) : 0;
+  return (
+    <span className="sfchat-gauge-wrap">
+      <span
+        className={`sfchat-gauge ${known && pct >= WARM_AT_PCT ? 'warm' : ''}`}
+        role="progressbar"
+        tabIndex={0}
+        aria-label="Conversation memory used"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={known ? Math.round(pct) : undefined}
+        aria-describedby={tipId}
+      >
+        <span className="sfchat-gauge-track">
+          <span className="sfchat-gauge-fill" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="sfchat-gauge-num">
+          {known ? `${formatTokens(used)} / ${formatTokens(limit)}` : '—'}
+        </span>
+      </span>
+
+      <span className="sfchat-gauge-tip" id={tipId} role="tooltip">
+        {known
+          ? `Context window: ${used.toLocaleString('en-US')} / ${limit.toLocaleString('en-US')}`
+          : 'Context window: —'}
+      </span>
+    </span>
+  );
+}
+
 // The AI chat isn't ready for the public yet, so it's gated behind internal/owner mode
 // (visit once with `?internal=1`). The panel — with all its hooks and body-shifting
 // side effects — only mounts for internal browsers; everyone else renders nothing.
@@ -124,6 +185,9 @@ function ChatPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [welcome, setWelcome] = useState('');
+  // Null until the thread's context size is known — a fresh chat has no figures yet, and a
+  // gauge reading 0% would be an invention. Only ever set from what the backend reports.
+  const [usage, setUsage] = useState<ChatUsage | null>(null);
   // The id the page loaded with — the restore query's key. Cleared once there's nothing to
   // restore (deleted, or the backend never had it), which disables the query.
   const [storedId, setStoredId] = useState(storedConversationId);
@@ -156,6 +220,7 @@ function ChatPanel() {
     conversationId.current = null;
     setStoredId(null);
     setWelcomeArmed(true);
+    setUsage(null); // a new thread's context is unknown again, not zero
   };
 
   // Stop the reveal loop if the widget unmounts mid-stream.
@@ -185,8 +250,10 @@ function ChatPanel() {
     if (!storedId || seeded.current || loadingHistory) return;
     seeded.current = true;
     const restored = restore.data?.messages ?? [];
-    if (restored.length) setMessages(restored);
-    else forget();
+    if (restored.length) {
+      setMessages(restored);
+      setUsage(restore.data?.usage ?? null); // rebuild the gauge, so a reload isn't a blank slate
+    } else forget();
   }, [storedId, loadingHistory, restore.data]);
 
   // Push the page over (desktop) rather than covering it; the panel width is
@@ -282,7 +349,7 @@ function ChatPanel() {
 
   async function send(text: string) {
     text = text.trim();
-    if (!text || busy) return;
+    if (!text || busy || usage?.exhausted) return;
     setInput('');
     setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }]);
@@ -370,6 +437,21 @@ function ChatPanel() {
     try {
       const res = await openStream();
       if (res.status === 429) throw new Error('You’re sending messages too fast — give it a moment.');
+
+      // A spent thread is refused before the model is ever called, so the answer is a JSON
+      // body rather than a stream — there's nothing to read. Distinct from the 429 above:
+      // waiting doesn't help, only a new chat does.
+      if (res.status === 403) {
+        const body = await res.json().catch(() => null);
+        if (body?.usage) setUsage(body.usage);
+        else setUsage((u) => (u ? { ...u, exhausted: true } : u));
+        // The turn never reached the model, so the stored thread has no record of it. Drop
+        // the optimistic pair rather than show a turn that a reload would silently erase.
+        setMessages((m) => m.slice(0, -2));
+        finish();
+        return;
+      }
+
       if (!res.ok || !res.body) throw new Error('Sorry, I’m having trouble right now.');
       setStatus('thinking');
 
@@ -392,6 +474,11 @@ function ChatPanel() {
           }
           if (data.tool && data.status === 'start') setStatus(TOOL_LABELS[data.tool] ?? 'working');
           if (data.tool && data.status === 'end') setStatus('writing');
+          // One frame per turn, just before `done`. It carries the thread's context size as
+          // of now — it already includes every earlier turn, so it replaces the last value
+          // rather than adding to it. Absent when the provider reported no usage: keep what
+          // we had, since resetting to zero would claim the context emptied, which is a lie.
+          if (data.usage) setUsage(data.usage);
           if (data.text) {
             setStatus(null);
             pending += data.text; // reveal loop paints it at a steady pace
@@ -419,6 +506,11 @@ function ChatPanel() {
   const idle = messages.length === 0;
   // Nothing to delete on a fresh, empty chat.
   const canDelete = !idle && !loadingHistory;
+  // The usage frame arrives *before* the stream's `done`, so a thread can be spent while its
+  // last reply is still being written. Hold the composer until that reply lands: only the
+  // *next* send is refused, and "start a new chat" must not be reachable mid-stream — deleting
+  // there would clear the messages the reveal loop is still writing into.
+  const exhausted = usage?.exhausted === true && !busy;
 
   return (
     <>
@@ -568,41 +660,68 @@ function ChatPanel() {
           )}
         </div>
 
-        <form
-          className="sfchat-composer-wrap"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send(input);
-          }}
-        >
-          <div className="sfchat-composer">
-            <div className="sfchat-composer-row">
-              <textarea
-                ref={fieldRef}
-                className="sfchat-field"
-                value={input}
-                rows={1}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    send(input);
-                  }
-                }}
-                placeholder="Ask about Souhaib…"
-                aria-label="Your message"
-                disabled={busy}
-              />
-              <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
-                <SendIcon />
-              </button>
+        {exhausted ? (
+          // Nothing more can be sent to a spent thread, so a composer would only be a dead
+          // end. Offer the way forward instead — and say plainly that it clears this one.
+          <div className="sfchat-composer-wrap">
+            <div className="sfchat-spent" role="status">
+              <p className="sfchat-spent-title">This chat is full.</p>
+              <p className="sfchat-spent-sub">
+                Every message carries the whole conversation with it, so a long thread
+                eventually reaches its limit. A new chat starts clean — this one is cleared.
+              </p>
+              <div className="sfchat-spent-foot">
+                <ContextGauge usage={usage} />
+                <button
+                  className="sfchat-spent-go"
+                  onClick={() => del.mutate(conversationId.current)}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Starting…' : deleteFailed ? 'Retry' : 'Start a new chat'}
+                </button>
+              </div>
             </div>
-            <p className="sfchat-note">
-              <Info size={12} strokeWidth={2} />
-              This assistant is rate-limited to keep it free.
-            </p>
           </div>
-        </form>
+        ) : (
+          <form
+            className="sfchat-composer-wrap"
+            onSubmit={(e) => {
+              e.preventDefault();
+              send(input);
+            }}
+          >
+            <div className="sfchat-composer">
+              <div className="sfchat-composer-row">
+                <textarea
+                  ref={fieldRef}
+                  className="sfchat-field"
+                  value={input}
+                  rows={1}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      send(input);
+                    }
+                  }}
+                  placeholder="Ask about Souhaib…"
+                  aria-label="Your message"
+                  disabled={busy}
+                />
+                <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
+                  <SendIcon />
+                </button>
+              </div>
+              <p className="sfchat-note">
+                <span className="sfchat-note-text">
+                  <Info size={12} strokeWidth={2} />
+                  This assistant is rate-limited to keep it free.
+                </span>
+                <ContextGauge usage={usage} />
+              </p>
+            </div>
+          </form>
+        )}
       </aside>
     </>
   );
@@ -796,13 +915,61 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
 .sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 15px; line-height: 1.5; padding: 16px 12px; resize: none; overflow-y: auto; min-height: 64px; max-height: 150px; }
 .sfchat-field::placeholder { color: var(--muted); }
-.sfchat-note { display: flex; align-items: center; gap: 5px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.sfchat-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.sfchat-note-text { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .sfchat-note svg { flex-shrink: 0; opacity: .8; }
+
+/* Context gauge: a hairline bar that stays quiet until the thread is nearly spent. No
+   gradient, no glow, no ambient animation — it earns attention only by warming. */
+.sfchat-gauge-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.sfchat-gauge { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-variant-numeric: tabular-nums; cursor: default; border-radius: 4px; }
+
+/* Tooltip: the bar can't say what it measures, so hovering (or focusing) explains it and
+   prints the exact figures the label rounds off. Opens upward — the gauge sits at the
+   bottom of a panel that clips its overflow. Mirrors the confirm popover's surface. */
+.sfchat-gauge-tip {
+  position: absolute; bottom: calc(100% + 9px); right: 0; z-index: 4;
+  width: max-content; white-space: nowrap;
+  font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: var(--shadow-lg); padding: 10px 11px;
+  opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease, visibility .16s;
+}
+.sfchat-gauge-wrap:hover .sfchat-gauge-tip,
+.sfchat-gauge:focus-visible ~ .sfchat-gauge-tip { opacity: 1; visibility: visible; transform: none; }
+/* Arrow pointing back down at the bar. */
+.sfchat-gauge-tip::after {
+  content: ''; position: absolute; bottom: -5px; right: 14px; width: 8px; height: 8px;
+  background: var(--surface); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.sfchat-gauge-track { width: 38px; height: 3px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--text) 12%, transparent); }
+.sfchat-gauge-fill { display: block; height: 100%; border-radius: inherit; background: var(--muted); transition: width .4s ease, background-color .4s ease; }
+.sfchat-gauge-num { color: var(--muted); white-space: nowrap; }
+.sfchat-gauge.warm .sfchat-gauge-fill { background: var(--warn); }
+.sfchat-gauge.warm .sfchat-gauge-num { color: var(--warn); }
+
+/* Spent thread: replaces the composer. An invitation, not an error — no danger colour. */
+.sfchat-spent { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 14px; }
+.sfchat-spent-title { margin: 0; font-size: 13.5px; font-weight: 500; color: var(--text); }
+.sfchat-spent-sub { margin: 4px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.sfchat-spent-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; font-size: 11px; }
+.sfchat-spent-go {
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  border: 1px solid transparent; border-radius: 8px; padding: 7px 11px;
+  background: var(--accent); color: #fff;
+  transition: filter .15s ease;
+}
+.sfchat-spent-go:hover:not(:disabled) { filter: brightness(1.08); }
+.sfchat-spent-go:disabled { opacity: .55; cursor: default; }
+/* Dark accent is bright; ink text keeps AA contrast on the solid button (mirrors .btn-solid). */
+.dark .sfchat-spent-go { color: #08272a; }
 .sfchat-send { width: 42px; height: 42px; flex-shrink: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center; transition: opacity .15s ease, transform .12s ease; }
 .sfchat-send:hover:not(:disabled) { transform: scale(1.05); }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
-  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm { transition: none; animation: none; }
+  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm, .sfchat-gauge-fill, .sfchat-gauge-tip { transition: none; animation: none; }
 }
 `;

@@ -9,6 +9,12 @@ type ConversationRestore =
 
 export type Message = ConversationRestore['messages'][number];
 
+/**
+ * The context-gauge figures. The restore payload and the SSE `usage` frame share one schema
+ * component upstream, so reading it off the restore type keeps the two from drifting.
+ */
+export type ChatUsage = ConversationRestore['usage'];
+
 export const conversationKey = (id: string) => ['conversation', id] as const;
 
 /**
