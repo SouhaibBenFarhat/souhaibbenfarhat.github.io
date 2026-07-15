@@ -37,7 +37,7 @@
 html {
   background-color: var(--bg);
   color: var(--text);
-  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
