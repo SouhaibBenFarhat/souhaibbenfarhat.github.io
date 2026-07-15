@@ -1,0 +1,33 @@
+---
+import Base from '../layouts/Base.astro';
+import { profile } from '../data/site';
+
+// GitHub Pages serves this for any unknown path, with a real 404 status — which is also why it
+// needs no `noindex`: the status code already keeps it out of the index.
+---
+<Base
+  title="Page not found"
+  description="That page doesn't exist. The work, the experience, and the CV are all on the home page."
+>
+  <section>
+    <div class="wrap max-w-prose pb-16 pt-20 sm:pt-28">
+      <p class="label">404</p>
+      <h1 class="mt-4 font-display text-4xl leading-tight tracking-tight sm:text-5xl">
+        This page doesn&rsquo;t exist.
+      </h1>
+      <p class="mt-6 text-[1.02rem] leading-relaxed text-muted">
+        The link may be out of date, or I may have moved something. Everything worth reading —
+        the work, the experience, the CV — is one click away.
+      </p>
+
+      <div class="mt-9 flex flex-wrap items-center gap-3">
+        <a href="/" class="btn-solid">Back to home</a>
+        <a href={profile.cv} class="btn" download>
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg>
+          Download CV
+        </a>
+        <a href={`mailto:${profile.email}`} class="btn">Email me</a>
+      </div>
+    </div>
+  </section>
+</Base>

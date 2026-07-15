@@ -2,4 +2,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://souhaibbenfarhat.github.io/sitemap.xml
+Sitemap: https://souhaibbenfarhat.github.io/sitemap-index.xml

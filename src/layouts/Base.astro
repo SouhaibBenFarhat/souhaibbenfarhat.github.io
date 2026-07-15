@@ -1,4 +1,13 @@
 ---
+// Fonts are self-hosted rather than fetched from Google. Two reasons: they load from our own
+// origin, so there's no second DNS+TLS handshake in front of a render-blocking stylesheet; and
+// no visitor IP reaches Google — which the consent banner would otherwise have to account for,
+// since analytics is gated but this was not (a German court has ruled on exactly that).
+// Fraunces uses the opsz build: it runs from 15px labels to 60px headings, and the optical-size
+// axis is what keeps both ends right — the Google URL was requesting it too.
+import '@fontsource-variable/inter';
+import '@fontsource-variable/fraunces/opsz.css';
+
 import '../styles/global.css';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
@@ -8,12 +17,17 @@ import { profile } from '../data/site';
 
 interface Props { title?: string; description?: string; }
 const { title, description } = Astro.props;
-const pageTitle = title ? `${title} · ${profile.name}` : `${profile.name} — ${profile.title}`;
+const pageTitle = title ? `${title} · ${profile.name}` : profile.seoTitle;
 const desc = description ?? profile.seoDescription;
 
 // Absolute URLs (required for canonical + social image).
 const canonical = new URL(Astro.url.pathname, Astro.site).href;
 const ogImage = new URL('/og.png', Astro.site).href;
+
+// The Person schema below claims "this URL is the page about Souhaib", so exactly one page may
+// carry it. Emitting it from the layout put it on /privacy too, leaving two URLs making that
+// same claim for a search engine to pick between.
+const isHome = Astro.url.pathname === '/';
 
 // JSON-LD Person schema — tells search engines who this is and links identities.
 const personSchema = {
@@ -46,6 +60,9 @@ const personSchema = {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {/* iOS ignores SVG icons: without this, a home-screen bookmark is a page screenshot. Square
+        and opaque on purpose — iOS applies its own mask, and would composite alpha onto black. */}
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>{pageTitle}</title>
     <meta name="description" content={desc} />
     <link rel="canonical" href={canonical} />
@@ -69,20 +86,13 @@ const personSchema = {
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={desc} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={`${profile.name} — ${profile.title}`} />
 
     <meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0d0f12" media="(prefers-color-scheme: dark)" />
 
-    {/* Structured data — Person schema */}
-    <script type="application/ld+json" set:html={JSON.stringify(personSchema)} />
-
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    {/* Structured data — Person schema. Home only: see `isHome`. */}
+    {isHome && <script type="application/ld+json" set:html={JSON.stringify(personSchema)} />}
 
     {/* Set theme before paint to avoid a flash */}
     <script is:inline>

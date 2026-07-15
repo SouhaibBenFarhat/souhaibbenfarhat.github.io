@@ -93,7 +93,7 @@ const CSS = `
 .sfcc-content { margin: 0; }
 .sfcc-title {
   display: block; margin-bottom: 5px;
-  font-family: 'Fraunces', ui-serif, Georgia, serif;
+  font-family: 'Fraunces Variable', ui-serif, Georgia, serif;
   font-size: 15.5px; font-weight: 500; letter-spacing: -.01em; color: var(--text);
 }
 .sfcc-text { display: block; font-size: 13px; line-height: 1.55; color: var(--muted); }

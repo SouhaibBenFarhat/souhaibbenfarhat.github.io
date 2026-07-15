@@ -14,8 +14,10 @@ export default {
         'accent-ink': 'var(--accent-ink)',
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['Fraunces', 'ui-serif', 'Georgia', 'serif'],
+        // "… Variable" is the family name the self-hosted @fontsource-variable builds register
+        // (see Base.astro) — not a label, so it can't be shortened.
+        sans: ['Inter Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['Fraunces Variable', 'ui-serif', 'Georgia', 'serif'],
       },
       maxWidth: {
         content: '68rem',
