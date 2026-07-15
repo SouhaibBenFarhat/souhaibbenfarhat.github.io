@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare } from 'lucide-react';
+import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
 
 import { isInternal } from '../../lib/internal';
 
@@ -125,6 +125,11 @@ function ChatPanel() {
   // hold the welcome; otherwise it's a fresh session and the welcome is armed.
   const [loadingHistory, setLoadingHistory] = useState(() => storedConversationId() != null);
   const [welcomeArmed, setWelcomeArmed] = useState(() => storedConversationId() == null);
+  // Bumped after a delete so the greeting replays even though `welcomeArmed` was already true.
+  const [welcomeRun, setWelcomeRun] = useState(0);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
   const conversationId = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
@@ -236,7 +241,7 @@ function ChatPanel() {
       window.clearTimeout(start);
       if (interval) window.clearInterval(interval);
     };
-  }, [welcomeArmed]);
+  }, [welcomeArmed, welcomeRun]);
 
   useEffect(() => {
     // While streaming, the text grows a few chars per frame — an instant scroll pins
@@ -248,10 +253,44 @@ function ChatPanel() {
     });
   }, [messages, status, welcome, open, busy]);
 
+  // Delete the thread on the backend, then reset to a first-visit chat. The privacy page
+  // promises the conversation is *really* gone, so a failed request must not clear the UI
+  // and pretend it worked — keep the thread and let the user retry. 404 means it's already
+  // gone, which lands in the same place as a 204.
+  async function deleteConversation() {
+    const id = conversationId.current;
+    setDeleting(true);
+    setDeleteFailed(false);
+    if (id) {
+      try {
+        const res = await fetch(`${API}/chat/conversations/${id}/`, { method: 'DELETE' });
+        if (!res.ok && res.status !== 404) throw new Error('delete failed');
+      } catch {
+        setDeleting(false);
+        setDeleteFailed(true);
+        return;
+      }
+    }
+    try {
+      localStorage.removeItem(CONV_KEY);
+    } catch {
+      /* ignore */
+    }
+    conversationId.current = null;
+    setMessages([]);
+    setStatus(null);
+    setDeleting(false);
+    setConfirmingDelete(false);
+    setWelcome('');
+    setWelcomeArmed(true);
+    setWelcomeRun((n) => n + 1);
+  }
+
   async function send(text: string) {
     text = text.trim();
     if (!text || busy) return;
     setInput('');
+    setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }]);
     setBusy(true);
     setStatus('thinking');
@@ -384,6 +423,8 @@ function ChatPanel() {
   }
 
   const idle = messages.length === 0;
+  // Nothing to delete on a fresh, empty chat.
+  const canDelete = !idle && !loadingHistory;
 
   return (
     <>
@@ -419,9 +460,46 @@ function ChatPanel() {
               </span>
             </div>
           </div>
-          <button className="sfchat-min" onClick={() => setOpen(false)} aria-label="Minimize">
-            <MinIcon />
-          </button>
+          <div className="sfchat-actions">
+            {canDelete &&
+              (confirmingDelete ? (
+                <span className="sfchat-confirm" role="group" aria-label="Confirm deleting the conversation">
+                  <span className="sfchat-confirm-q">
+                    {deleteFailed ? 'Couldn’t delete.' : 'Delete chat?'}
+                  </span>
+                  <button
+                    className="sfchat-confirm-yes"
+                    onClick={deleteConversation}
+                    disabled={deleting}
+                  >
+                    {deleting ? 'Deleting…' : deleteFailed ? 'Retry' : 'Delete'}
+                  </button>
+                  <button
+                    className="sfchat-confirm-no"
+                    onClick={() => {
+                      setConfirmingDelete(false);
+                      setDeleteFailed(false);
+                    }}
+                    disabled={deleting}
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="sfchat-act"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={busy}
+                  aria-label="Delete conversation"
+                  title="Delete conversation"
+                >
+                  <TrashIcon />
+                </button>
+              ))}
+            <button className="sfchat-min" onClick={() => setOpen(false)} aria-label="Minimize">
+              <MinIcon />
+            </button>
+          </div>
         </header>
 
         <div className="sfchat-list" ref={listRef}>
@@ -530,6 +608,9 @@ function ChatIcon() {
 function MinIcon() {
   return <ChevronDown size={18} strokeWidth={2} />;
 }
+function TrashIcon() {
+  return <Trash2 size={16} strokeWidth={2} />;
+}
 function SendIcon() {
   return <ArrowUp size={18} strokeWidth={2.25} />;
 }
@@ -591,8 +672,9 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
   padding: 15px 18px;
   background: color-mix(in srgb, var(--surface), #fff 9%); box-shadow: var(--shadow-sm);
 }
-.sfchat-id { display: flex; align-items: center; gap: 11px; }
-.sfchat-id strong { display: block; font-size: 14.5px; letter-spacing: -.01em; }
+.sfchat-id { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.sfchat-id > div { min-width: 0; }
+.sfchat-id strong { display: block; font-size: 14.5px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sfchat-online { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 .sfchat-online i { width: 6px; height: 6px; border-radius: 50%; background: #38b26a; animation: sfchat-live 2s ease-out infinite; }
 @keyframes sfchat-live { 0% { box-shadow: 0 0 0 0 rgba(56,178,106,.5); } 70%,100% { box-shadow: 0 0 0 5px rgba(56,178,106,0); } }
@@ -602,6 +684,29 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 .sfchat-min { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; }
 .sfchat-min:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+
+/* Header actions: the destructive one sits left of minimize and stays quiet until hovered. */
+.sfchat-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.sfchat-act { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; transition: color .15s ease, background .15s ease; }
+.sfchat-act:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.sfchat-act:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Inline confirm — swaps in for the trash icon, so no native dialog breaks the panel's language. */
+.sfchat-confirm { display: inline-flex; align-items: center; gap: 6px; animation: sfchat-confirm-in .18s cubic-bezier(.22,.61,.36,1) both; }
+@keyframes sfchat-confirm-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+.sfchat-confirm-q { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.sfchat-confirm-yes, .sfchat-confirm-no {
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;
+  background: transparent; color: var(--text);
+  transition: border-color .15s ease, background .15s ease, color .15s ease, filter .15s ease;
+}
+.sfchat-confirm-yes:disabled, .sfchat-confirm-no:disabled { opacity: .55; cursor: default; }
+.sfchat-confirm-yes { border-color: transparent; background: var(--danger); color: #fff; }
+.sfchat-confirm-yes:hover:not(:disabled) { filter: brightness(1.08); }
+/* Dark danger is bright; ink text keeps AA contrast on the solid button (mirrors .btn-solid). */
+.dark .sfchat-confirm-yes { color: #2d0a06; }
+.sfchat-confirm-no:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 
 /* Body: the recessed surface. Bubbles float on it. */
 .sfchat-list { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
@@ -676,6 +781,6 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
-  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip { transition: none; animation: none; }
+  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm { transition: none; animation: none; }
 }
 `;
