@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
 
+import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
-
-const API = import.meta.env.PUBLIC_CHAT_API ?? 'https://portfolio-backend-2huw.onrender.com';
+import { createQueryClient } from '../../lib/queries/client';
+import { useConversation, type Message } from '../../lib/queries/useConversation';
+import { useDeleteConversation } from '../../lib/queries/useDeleteConversation';
 
 const TOOL_LABELS: Record<string, string> = {
   get_facts: 'loading facts',
@@ -32,12 +35,6 @@ const MIN_WIDTH = 380;
 const REVEAL_CPS = 40; // baseline reveal speed (chars/sec) — lower feels slower
 const REVEAL_CATCHUP = 1.6; // extra chars/sec per buffered char, to catch up when behind
 const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smoothly, not instantly
-
-// Keep the restore skeleton on screen for at least this long, so a fast backend
-// response doesn't flash the skeleton for a split second (which looks worse than none).
-const MIN_SKELETON_MS = 1000;
-
-type Message = { role: 'user' | 'assistant'; content: string };
 
 // Render a safe subset of markdown: escape first, then add our own tags only.
 function escapeHtml(s: string): string {
@@ -108,8 +105,14 @@ function ChatSkeleton() {
 // side effects — only mounts for internal browsers; everyone else renders nothing.
 export default function ChatWidget() {
   const [internal, setInternal] = useState(false);
+  // Per-mount client, so nothing is cached across mounts (or across tests).
+  const [queryClient] = useState(createQueryClient);
   useEffect(() => setInternal(isInternal()), []);
-  return internal ? <ChatPanel /> : null;
+  return internal ? (
+    <QueryClientProvider client={queryClient}>
+      <ChatPanel />
+    </QueryClientProvider>
+  ) : null;
 }
 
 function ChatPanel() {
@@ -121,20 +124,39 @@ function ChatPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [welcome, setWelcome] = useState('');
-  // If a prior conversation id is stored, start in the loading state (skeleton) and
-  // hold the welcome; otherwise it's a fresh session and the welcome is armed.
-  const [loadingHistory, setLoadingHistory] = useState(() => storedConversationId() != null);
-  const [welcomeArmed, setWelcomeArmed] = useState(() => storedConversationId() == null);
+  // The id the page loaded with — the restore query's key. Cleared once there's nothing to
+  // restore (deleted, or the backend never had it), which disables the query.
+  const [storedId, setStoredId] = useState(storedConversationId);
+  // A fresh session (no stored id) has nothing to restore, so the welcome is armed straight away.
+  const [welcomeArmed, setWelcomeArmed] = useState(storedId == null);
   // Bumped after a delete so the greeting replays even though `welcomeArmed` was already true.
   const [welcomeRun, setWelcomeRun] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteFailed, setDeleteFailed] = useState(false);
-  const conversationId = useRef<string | null>(null);
+  const conversationId = useRef<string | null>(storedId);
+  const seeded = useRef(false);
+  const confirmRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const revealRaf = useRef<number | null>(null);
   const welcomeDone = welcome.length >= WELCOME.length;
+
+  const restore = useConversation(storedId);
+  const del = useDeleteConversation();
+  const loadingHistory = restore.isLoading; // floored — the skeleton never flashes
+  const deleting = del.isDeleting; // floored — "Deleting…" is always readable
+  const deleteFailed = del.isError && !deleting;
+
+  /** Forget the stored thread and greet as if this were a first visit. */
+  const forget = () => {
+    try {
+      localStorage.removeItem(CONV_KEY);
+    } catch {
+      /* ignore */
+    }
+    conversationId.current = null;
+    setStoredId(null);
+    setWelcomeArmed(true);
+  };
 
   // Stop the reveal loop if the widget unmounts mid-stream.
   useEffect(() => () => {
@@ -155,49 +177,17 @@ function ChatPanel() {
     return () => window.clearTimeout(t);
   }, []);
 
-  // Restore a prior conversation from the backend so it survives a reload. A skeleton
-  // shows while the fetch is in flight (no blank flash, no layout jump). A 404 or any
-  // failure means the thread is gone (e.g. the free DB was reset) → start fresh.
+  // Seed the panel from the restored conversation once the query settles and its loading
+  // floor has elapsed. An error or an empty thread means there's nothing to show (a 404 —
+  // e.g. the free DB was reset) → forget it and greet as a fresh chat. Runs once: later
+  // renders must not stomp on messages that streaming has since appended.
   useEffect(() => {
-    const id = storedConversationId();
-    conversationId.current = id;
-    if (!id) return; // fresh session — the welcome is already armed
-    let cancelled = false;
-    const startedAt = performance.now();
-
-    const forget = () => {
-      try {
-        localStorage.removeItem(CONV_KEY);
-      } catch {
-        /* ignore */
-      }
-      conversationId.current = null;
-      setWelcomeArmed(true); // nothing to restore → greet as a fresh chat
-    };
-
-    (async () => {
-      let restored: Message[] = [];
-      try {
-        const res = await fetch(`${API}/chat/conversations/${id}/`);
-        if (!res.ok) throw new Error('gone');
-        const data = await res.json();
-        restored = Array.isArray(data.messages) ? data.messages : [];
-      } catch {
-        restored = [];
-      }
-      // Hold the skeleton for a minimum time so a fast response doesn't flash it.
-      const remaining = MIN_SKELETON_MS - (performance.now() - startedAt);
-      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-      if (cancelled) return;
-      if (restored.length) setMessages(restored);
-      else forget();
-      setLoadingHistory(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!storedId || seeded.current || loadingHistory) return;
+    seeded.current = true;
+    const restored = restore.data?.messages ?? [];
+    if (restored.length) setMessages(restored);
+    else forget();
+  }, [storedId, loadingHistory, restore.data]);
 
   // Push the page over (desktop) rather than covering it; the panel width is
   // shared with the page via a CSS variable.
@@ -253,38 +243,42 @@ function ChatPanel() {
     });
   }, [messages, status, welcome, open, busy]);
 
-  // Delete the thread on the backend, then reset to a first-visit chat. The privacy page
-  // promises the conversation is *really* gone, so a failed request must not clear the UI
-  // and pretend it worked — keep the thread and let the user retry. 404 means it's already
-  // gone, which lands in the same place as a 204.
-  async function deleteConversation() {
-    const id = conversationId.current;
-    setDeleting(true);
-    setDeleteFailed(false);
-    if (id) {
-      try {
-        const res = await fetch(`${API}/chat/conversations/${id}/`, { method: 'DELETE' });
-        if (!res.ok && res.status !== 404) throw new Error('delete failed');
-      } catch {
-        setDeleting(false);
-        setDeleteFailed(true);
-        return;
-      }
-    }
-    try {
-      localStorage.removeItem(CONV_KEY);
-    } catch {
-      /* ignore */
-    }
-    conversationId.current = null;
+  // Dismiss the confirm popover on Escape or a click outside it.
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const dismiss = () => {
+      setConfirmingDelete(false);
+      del.reset();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') dismiss();
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!confirmRef.current?.contains(e.target as Node)) dismiss();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onDown);
+    };
+  }, [confirmingDelete]);
+
+  // Reset once the delete has succeeded *and* its loading floor has elapsed. Resetting the
+  // moment the request resolves would unmount the confirm before "Deleting…" could be read,
+  // which is exactly the flash the floor exists to prevent. A failure leaves everything in
+  // place: the privacy page promises the data is really gone, so the thread stays until the
+  // backend confirms it.
+  useEffect(() => {
+    if (!del.isSuccess || deleting) return;
+    forget();
     setMessages([]);
     setStatus(null);
-    setDeleting(false);
     setConfirmingDelete(false);
     setWelcome('');
-    setWelcomeArmed(true);
-    setWelcomeRun((n) => n + 1);
-  }
+    setWelcomeRun((n) => n + 1); // replay the greeting, as on a first visit
+    del.reset();
+  }, [del.isSuccess, deleting]);
 
   async function send(text: string) {
     text = text.trim();
@@ -461,41 +455,53 @@ function ChatPanel() {
             </div>
           </div>
           <div className="sfchat-actions">
-            {canDelete &&
-              (confirmingDelete ? (
-                <span className="sfchat-confirm" role="group" aria-label="Confirm deleting the conversation">
-                  <span className="sfchat-confirm-q">
-                    {deleteFailed ? 'Couldn’t delete.' : 'Delete chat?'}
-                  </span>
-                  <button
-                    className="sfchat-confirm-yes"
-                    onClick={deleteConversation}
-                    disabled={deleting}
-                  >
-                    {deleting ? 'Deleting…' : deleteFailed ? 'Retry' : 'Delete'}
-                  </button>
-                  <button
-                    className="sfchat-confirm-no"
-                    onClick={() => {
-                      setConfirmingDelete(false);
-                      setDeleteFailed(false);
-                    }}
-                    disabled={deleting}
-                  >
-                    Cancel
-                  </button>
-                </span>
-              ) : (
+            {canDelete && (
+              <div className="sfchat-act-wrap" ref={confirmRef}>
                 <button
                   className="sfchat-act"
-                  onClick={() => setConfirmingDelete(true)}
+                  onClick={() => setConfirmingDelete((v) => !v)}
                   disabled={busy}
                   aria-label="Delete conversation"
-                  title="Delete conversation"
+                  aria-expanded={confirmingDelete}
                 >
                   <TrashIcon />
                 </button>
-              ))}
+
+                {confirmingDelete && (
+                  <div
+                    className="sfchat-confirm"
+                    role="dialog"
+                    aria-label="Confirm deleting the conversation"
+                  >
+                    <p className="sfchat-confirm-q">
+                      {deleteFailed ? 'Couldn’t delete.' : 'Delete chat?'}
+                    </p>
+                    <p className="sfchat-confirm-sub">
+                      {deleteFailed ? 'The conversation is still there.' : 'This can’t be undone.'}
+                    </p>
+                    <div className="sfchat-confirm-actions">
+                      <button
+                        className="sfchat-confirm-no"
+                        onClick={() => {
+                          setConfirmingDelete(false);
+                          del.reset();
+                        }}
+                        disabled={deleting}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="sfchat-confirm-yes"
+                        onClick={() => del.mutate(conversationId.current)}
+                        disabled={deleting}
+                      >
+                        {deleting ? 'Deleting…' : deleteFailed ? 'Retry' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <button className="sfchat-min" onClick={() => setOpen(false)} aria-label="Minimize">
               <MinIcon />
             </button>
@@ -691,10 +697,26 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-act:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .sfchat-act:disabled { opacity: .35; cursor: not-allowed; }
 
-/* Inline confirm — swaps in for the trash icon, so no native dialog breaks the panel's language. */
-.sfchat-confirm { display: inline-flex; align-items: center; gap: 6px; animation: sfchat-confirm-in .18s cubic-bezier(.22,.61,.36,1) both; }
-@keyframes sfchat-confirm-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
-.sfchat-confirm-q { font-size: 12px; color: var(--muted); white-space: nowrap; }
+/* Confirm tooltip: a popover anchored under the trash icon, rather than a native dialog.
+   The panel clips overflow, so it opens downward and right-aligned to stay inside. */
+.sfchat-act-wrap { position: relative; display: flex; }
+.sfchat-confirm {
+  position: absolute; top: calc(100% + 9px); right: 0; z-index: 3;
+  width: max-content; min-width: 232px; max-width: 280px; text-align: left;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 11px;
+  box-shadow: var(--shadow-lg); padding: 11px 12px;
+  animation: sfchat-confirm-in .16s cubic-bezier(.22,.61,.36,1) both;
+}
+/* Arrow pointing back up at the icon. */
+.sfchat-confirm::before {
+  content: ''; position: absolute; top: -5px; right: 12px; width: 8px; height: 8px;
+  background: var(--surface); border-left: 1px solid var(--line); border-top: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+@keyframes sfchat-confirm-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.sfchat-confirm-q { margin: 0; font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; }
+.sfchat-confirm-sub { margin: 3px 0 0; font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.sfchat-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .sfchat-confirm-yes, .sfchat-confirm-no {
   font: inherit; font-size: 12px; line-height: 1; cursor: pointer; white-space: nowrap;
   border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;

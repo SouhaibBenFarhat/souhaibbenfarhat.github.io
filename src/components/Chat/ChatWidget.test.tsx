@@ -15,6 +15,10 @@ const RESTORED = [
   { role: 'assistant', content: 'He owns AI features end to end.' },
 ];
 
+// Every loading state is floored at 1s (useMinLoadingDuration), so anything waiting on a
+// settled load needs longer than waitFor's 1s default.
+const SETTLED = { timeout: 3000 };
+
 type Call = { url: string; method: string };
 let calls: Call[] = [];
 /** Status the stubbed backend answers DELETE with. */
@@ -32,6 +36,10 @@ beforeEach(() => {
     vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       calls.push({ url: String(url), method });
+      // A real request always takes at least a tick. Resolving in a microtask lets React
+      // batch the pending state away entirely, so the loading flag is never rendered — and
+      // a floor over a state that never rendered is meaningless (nothing flashed either).
+      await new Promise((r) => setTimeout(r, 20));
       if (method === 'DELETE') {
         return { ok: deleteStatus >= 200 && deleteStatus < 300, status: deleteStatus };
       }
@@ -91,17 +99,41 @@ describe('ChatWidget — deleting a conversation', () => {
     expect(screen.getByRole('button', { name: 'Delete conversation' })).not.toBeNull();
   });
 
+  it('Escape dismisses the confirm without deleting', async () => {
+    const trash = await renderRestored();
+    fireEvent.click(trash);
+    expect(screen.getByText('Delete chat?')).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByText('Delete chat?')).toBeNull();
+    expect(deleteCalls()).toHaveLength(0);
+    expect(localStorage.getItem('chat_conversation_id')).toBe(CID);
+  });
+
+  it('clicking outside dismisses the confirm without deleting', async () => {
+    const trash = await renderRestored();
+    fireEvent.click(trash);
+    expect(screen.getByText('Delete chat?')).not.toBeNull();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText('Delete chat?')).toBeNull();
+    expect(deleteCalls()).toHaveLength(0);
+    expect(localStorage.getItem('chat_conversation_id')).toBe(CID);
+  });
+
   it('DELETEs the conversation, then resets to a fresh chat', async () => {
     const trash = await renderRestored();
     fireEvent.click(trash);
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     // Hits the same URL the restore uses, with the DELETE method.
-    await waitFor(() => expect(deleteCalls()).toHaveLength(1));
+    await waitFor(() => expect(deleteCalls()).toHaveLength(1), SETTLED);
     expect(deleteCalls()[0].url).toBe(CONV_URL);
 
     // The spec tells the client to drop its stored id; the messages go with it.
-    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull());
+    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull(), SETTLED);
     expect(screen.queryByText('He owns AI features end to end.')).toBeNull();
 
     // Back to a first-visit chat: the greeting is re-armed (typing indicator, then it types out)
@@ -110,13 +142,29 @@ describe('ChatWidget — deleting a conversation', () => {
     expect(screen.queryByRole('button', { name: 'Delete conversation' })).toBeNull();
   });
 
+  it('keeps "Deleting…" on screen even though the backend answers instantly', async () => {
+    const trash = await renderRestored();
+    fireEvent.click(trash);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    // The stub resolves in microseconds, so without the loading floor this state would be
+    // gone before it could be read.
+    await waitFor(() => expect(deleteCalls()).toHaveLength(1), SETTLED);
+    expect(screen.getByRole('button', { name: 'Deleting…' })).not.toBeNull();
+    // The request is already done, yet nothing has been torn down yet.
+    expect(localStorage.getItem('chat_conversation_id')).toBe(CID);
+
+    // ...and it does resolve, once the floor elapses.
+    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull(), SETTLED);
+  });
+
   it('treats a 404 as already deleted and still resets', async () => {
     deleteStatus = 404; // the thread was gone server-side (e.g. the free DB was reset)
     const trash = await renderRestored();
     fireEvent.click(trash);
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull());
+    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull(), SETTLED);
     expect(screen.queryByText('He owns AI features end to end.')).toBeNull();
   });
 
@@ -128,7 +176,7 @@ describe('ChatWidget — deleting a conversation', () => {
 
     // The privacy page promises the data is really gone, so a failed delete must not clear
     // the UI and imply success — the thread stays until the backend confirms.
-    await waitFor(() => expect(screen.getByText('Couldn’t delete.')).not.toBeNull());
+    await waitFor(() => expect(screen.getByText('Couldn’t delete.')).not.toBeNull(), SETTLED);
     expect(screen.getByRole('button', { name: 'Retry' })).not.toBeNull();
     expect(localStorage.getItem('chat_conversation_id')).toBe(CID);
     expect(screen.getByText('He owns AI features end to end.')).not.toBeNull();
@@ -139,12 +187,12 @@ describe('ChatWidget — deleting a conversation', () => {
     const trash = await renderRestored();
     fireEvent.click(trash);
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    await screen.findByRole('button', { name: 'Retry' });
+    await screen.findByRole('button', { name: 'Retry' }, SETTLED);
 
     deleteStatus = 204; // backend recovers
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
-    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull());
+    await waitFor(() => expect(localStorage.getItem('chat_conversation_id')).toBeNull(), SETTLED);
     expect(deleteCalls()).toHaveLength(2);
     expect(screen.queryByText('He owns AI features end to end.')).toBeNull();
   });
