@@ -57,6 +57,7 @@ let streamFrames: unknown[] = [];
 let forbiddenBody: unknown = null;
 
 const deleteCalls = () => calls.filter((c) => c.method === 'DELETE');
+const streamCalls = () => calls.filter((c) => c.url.endsWith('/chat/stream'));
 
 beforeEach(() => {
   calls = [];
@@ -381,5 +382,88 @@ describe('ChatWidget — context gauge', () => {
     // Back to a usable chat, with the gauge emptied back to unknown rather than zero.
     expect(screen.getByLabelText('Your message')).not.toBeNull();
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBeNull();
+  });
+});
+
+// jsdom does not blur an element when it becomes disabled, the way a browser does — so
+// `document.activeElement` alone cannot catch the bug these cover. The load-bearing assertion
+// is that the composer is never `disabled` mid-turn, which is what costs it the caret for real.
+describe('ChatWidget — composer focus', () => {
+  /** Open a fresh chat and put the caret in the composer, as clicking into it would. */
+  async function focusedComposer() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+    const field = screen.getByLabelText('Your message') as HTMLTextAreaElement;
+    field.focus();
+    expect(document.activeElement).toBe(field);
+    return field;
+  }
+
+  /** Hold the stream open after its last frame, to observe the composer mid-turn. */
+  function holdStream() {
+    streamFrames = [{ conversation_id: CID }, { text: 'Sure.' }];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+  }
+
+  it('keeps the caret in the composer while the reply streams', async () => {
+    holdStream();
+    const field = await focusedComposer();
+
+    fireEvent.change(field, { target: { value: 'hi' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    // The turn is still running. A `disabled` control cannot hold focus — the browser blurs it
+    // and the caret lands on <body> — so the composer must never disable itself mid-turn.
+    expect(field.disabled).toBe(false);
+    expect(document.activeElement).toBe(field);
+
+    releaseStream();
+  });
+
+  it('still refuses input and a second turn while the reply streams', async () => {
+    holdStream();
+    const field = await focusedComposer();
+
+    fireEvent.change(field, { target: { value: 'hi' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    // Keeping focus must not mean accepting input: readOnly holds the caret where disabled
+    // dropped it, while still refusing edits.
+    expect(field.readOnly).toBe(true);
+
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(streamCalls()).toHaveLength(1);
+
+    releaseStream();
+  });
+
+  it('leaves the caret in the composer once the reply lands', async () => {
+    const field = await focusedComposer();
+
+    fireEvent.change(field, { target: { value: 'hi' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
+
+    // The next question should be typeable straight away, with no click back into the field.
+    expect(field.readOnly).toBe(false);
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('puts the caret in the composer when sending with the button', async () => {
+    const field = await focusedComposer();
+
+    fireEvent.change(field, { target: { value: 'hi' } });
+    const button = screen.getByRole('button', { name: 'Send' });
+    button.focus(); // a real click focuses the button first
+    fireEvent.click(button);
+
+    // The button disables itself the moment it's pressed (busy, and the input just cleared),
+    // so focus cannot stay on it. It belongs back in the composer, not on <body>.
+    expect(document.activeElement).toBe(field);
+    await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
   });
 });

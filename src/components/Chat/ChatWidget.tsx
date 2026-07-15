@@ -351,6 +351,10 @@ function ChatPanel() {
     text = text.trim();
     if (!text || busy || usage?.exhausted) return;
     setInput('');
+    // Sending from the send button or a suggestion chip leaves focus on a control that is about
+    // to disable itself (or unmount), which would drop the caret on <body>. Put it back in the
+    // composer so the next question can just be typed. A no-op when Enter sent the message.
+    fieldRef.current?.focus();
     setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }]);
     setBusy(true);
@@ -706,7 +710,10 @@ function ChatPanel() {
                   }}
                   placeholder="Ask about Souhaib…"
                   aria-label="Your message"
-                  disabled={busy}
+                  // Not `disabled`: a disabled control can't hold focus, so the browser blurs it
+                  // and the caret lands on <body> for the whole turn. readOnly refuses edits just
+                  // the same, but keeps the caret. `send` already guards re-entrancy on `busy`.
+                  readOnly={busy}
                 />
                 <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
                   <SendIcon />
