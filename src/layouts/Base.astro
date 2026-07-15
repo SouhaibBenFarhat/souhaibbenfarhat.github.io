@@ -26,8 +26,14 @@ const ogImage = new URL('/og.png', Astro.site).href;
 
 // The Person schema below claims "this URL is the page about Souhaib", so exactly one page may
 // carry it. Emitting it from the layout put it on /privacy too, leaving two URLs making that
-// same claim for a search engine to pick between.
+// same claim for a search engine to pick between. The Search Console tag is scoped the same way,
+// for a different reason: URL-prefix verification only ever reads the root.
 const isHome = Astro.url.pathname === '/';
+
+// Proves ownership of the Search Console property. Not a secret — it only asserts that whoever
+// controls this page controls the property — so it belongs in the repo, not an env var. It must
+// stay here permanently: Google re-checks it, and verification lapses if the tag disappears.
+const GOOGLE_SITE_VERIFICATION = 'w2YtbYh4D7Ow1exnIyx_VqK8vrvllj4MIDlYaftBqRs';
 
 // JSON-LD Person schema — tells search engines who this is and links identities.
 const personSchema = {
@@ -68,6 +74,7 @@ const personSchema = {
     <link rel="canonical" href={canonical} />
     <meta name="author" content={profile.name} />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    {isHome && <meta name="google-site-verification" content={GOOGLE_SITE_VERIFICATION} />}
 
     {/* Open Graph — LinkedIn / Facebook / Slack previews */}
     <meta property="og:title" content={pageTitle} />
