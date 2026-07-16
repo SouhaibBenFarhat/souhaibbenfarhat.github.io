@@ -370,7 +370,9 @@ function ChatPanel() {
     setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [] }]);
     setBusy(true);
-    setStatus('thinking');
+    // No 'thinking' status: the empty assistant bubble already shows the typing dots, and a status
+    // line here would just duplicate it. The status line is reserved for the cold-start notice below.
+    setStatus(null);
 
     const setLastAssistant = (updater: (prev: string) => string) =>
       setMessages((m) => {
@@ -509,7 +511,9 @@ function ChatPanel() {
       }
 
       if (!res.ok || !res.body) throw new Error('Sorry, I’m having trouble right now.');
-      setStatus('thinking');
+      // Connected — clear any 'waking the assistant up…' notice. The typing dots carry it from here
+      // until the first tool or token arrives.
+      setStatus(null);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -705,8 +709,10 @@ function ChatPanel() {
               const tools = m.tools ?? [];
               const turnActive = i === messages.length - 1 && busy;
               // Typing dots cover only the initial think before any tool appears; once a tool shows,
-              // the timeline is the indicator (dots here would flash on and off between steps).
-              const showTyping = turnActive && !m.content && tools.length === 0;
+              // the timeline is the indicator (dots here would flash on and off between steps). They
+              // also stand down while a status line is up (the cold-start notice), so the two don't
+              // both show at once.
+              const showTyping = turnActive && !m.content && tools.length === 0 && !status;
               return (
                 <div key={i} className="sfchat-row assistant sfchat-enter">
                   <span className="sfchat-avatar sm"><AgentIcon /></span>
