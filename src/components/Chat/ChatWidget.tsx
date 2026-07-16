@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowUp, ArrowUpRight, Bot, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
+import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -8,12 +8,24 @@ import { createQueryClient } from '../../lib/queries/client';
 import { useConversation, type ChatUsage, type Message } from '../../lib/queries/useConversation';
 import { useDeleteConversation } from '../../lib/queries/useDeleteConversation';
 
+// Fallback labels for backends that don't send a per-frame `label` yet. The stream now carries a
+// human-readable `label` on each tool frame (ChatToolFrame), which is preferred; this map only
+// catches an older backend, and 'working' catches a tool it has no entry for.
 const TOOL_LABELS: Record<string, string> = {
   get_facts: 'loading facts',
   get_cv: 'reading the CV',
+  list_documents: 'browsing documents',
+  read_document: 'reading a document',
   list_github_projects: 'exploring projects',
   get_repo_readme: 'reading the project',
 };
+
+// A tool step the assistant took while answering. Shown in the message as it happens (a pulsing
+// dot) and kept afterwards as a record of what it did (a check). `done` flips on the tool's `end`
+// frame. Attached to the message locally — the restore endpoint doesn't persist tool steps, so
+// they survive the turn but not a reload.
+type ToolStep = { tool: string; label: string; done: boolean };
+type ChatMessage = Message & { tools?: ToolStep[] };
 
 const WELCOME =
   "Hey 👋 I'm Souhaib's assistant. Ask me about his projects, experience, skills, or " +
@@ -180,7 +192,7 @@ function ChatPanel() {
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -356,14 +368,53 @@ function ChatPanel() {
     // composer so the next question can just be typed. A no-op when Enter sent the message.
     fieldRef.current?.focus();
     setConfirmingDelete(false);
-    setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }]);
+    setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [] }]);
     setBusy(true);
     setStatus('thinking');
 
     const setLastAssistant = (updater: (prev: string) => string) =>
       setMessages((m) => {
         const copy = [...m];
-        copy[copy.length - 1] = { role: 'assistant', content: updater(copy[copy.length - 1].content) };
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, role: 'assistant', content: updater(last.content) };
+        return copy;
+      });
+
+    // Append a tool step to the current assistant message (a tool `start` frame).
+    const addToolStep = (tool: string, label: string) =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, tools: [...(last.tools ?? []), { tool, label, done: false }] };
+        return copy;
+      });
+
+    // Mark the most recent still-running step for this tool as done (a tool `end` frame). Matching
+    // the last open one — not the first — so a tool called twice in a turn closes in order.
+    const finishToolStep = (tool: string) =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        const tools = (last.tools ?? []).slice();
+        for (let i = tools.length - 1; i >= 0; i--) {
+          if (tools[i].tool === tool && !tools[i].done) {
+            tools[i] = { ...tools[i], done: true };
+            break;
+          }
+        }
+        copy[copy.length - 1] = { ...last, tools };
+        return copy;
+      });
+
+    // Close any step still marked running when the turn ends. Normally every tool got its `end`
+    // frame before the text streamed, so this is a no-op; it just stops a spinner outliving the
+    // turn if the stream is cut short or errors mid-tool.
+    const closeOpenTools = () =>
+      setMessages((m) => {
+        const last = m[m.length - 1];
+        if (!last?.tools?.some((t) => !t.done)) return m;
+        const copy = [...m];
+        copy[copy.length - 1] = { ...last, tools: last.tools.map((t) => (t.done ? t : { ...t, done: true })) };
         return copy;
       });
 
@@ -375,6 +426,7 @@ function ChatPanel() {
 
     const finish = () => {
       revealRaf.current = null;
+      closeOpenTools();
       setBusy(false);
       setStatus(null);
     };
@@ -476,8 +528,14 @@ function ChatPanel() {
             conversationId.current = data.conversation_id;
             localStorage.setItem('chat_conversation_id', data.conversation_id);
           }
-          if (data.tool && data.status === 'start') setStatus(TOOL_LABELS[data.tool] ?? 'working');
-          if (data.tool && data.status === 'end') setStatus('writing');
+          // Tool steps now render inside the message (a pulsing chip that resolves to a check),
+          // so they persist past the turn. Clear the transient status line — the chip is the
+          // live indicator — and prefer the backend's human-readable label over the local map.
+          if (data.tool && data.status === 'start') {
+            setStatus(null);
+            addToolStep(data.tool, data.label ?? TOOL_LABELS[data.tool] ?? 'Working…');
+          }
+          if (data.tool && data.status === 'end') finishToolStep(data.tool);
           // One frame per turn, just before `done`. It carries the thread's context size as
           // of now — it already includes every earlier turn, so it replaces the last value
           // rather than adding to it. Absent when the provider reported no usage: keep what
@@ -636,20 +694,37 @@ function ChatPanel() {
           )}
 
           {!loadingHistory &&
-            messages.map((m, i) => (
-            <div key={i} className={`sfchat-row ${m.role} sfchat-enter`}>
-              {m.role === 'assistant' && <span className="sfchat-avatar sm"><AgentIcon /></span>}
-              <div className={`sfchat-bubble ${m.role}`}>
-                {m.role === 'assistant' && i === messages.length - 1 && busy && !m.content ? (
-                  <TypingDots />
-                ) : m.role === 'assistant' ? (
-                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
-                ) : (
-                  m.content
-                )}
-              </div>
-            </div>
-          ))}
+            messages.map((m, i) => {
+              if (m.role === 'user') {
+                return (
+                  <div key={i} className="sfchat-row user sfchat-enter">
+                    <div className="sfchat-bubble user">{m.content}</div>
+                  </div>
+                );
+              }
+              const tools = m.tools ?? [];
+              const turnActive = i === messages.length - 1 && busy;
+              // Typing dots cover only the initial think before any tool appears; once a tool shows,
+              // the timeline is the indicator (dots here would flash on and off between steps).
+              const showTyping = turnActive && !m.content && tools.length === 0;
+              return (
+                <div key={i} className="sfchat-row assistant sfchat-enter">
+                  <span className="sfchat-avatar sm"><AgentIcon /></span>
+                  <div className="sfchat-assistant-col">
+                    {tools.length > 0 && <ToolActivity steps={tools} />}
+                    {(showTyping || m.content) && (
+                      <div className="sfchat-bubble assistant">
+                        {showTyping ? (
+                          <TypingDots />
+                        ) : (
+                          <span dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
 
           {status && (
             <div className="sfchat-status sfchat-enter">
@@ -731,6 +806,26 @@ function ChatPanel() {
         )}
       </aside>
     </>
+  );
+}
+
+// The tools the assistant used in one turn, as a timeline: a rotating spinner and a shimmering label
+// on the running step, a filled check on each finished one, joined by a rail that fills as it goes.
+// It stays fully open — including after the reply finishes — so a completed answer keeps the whole
+// record of the tools it ran. Steps live on the message, so they persist for the session (but not
+// across a reload — the backend doesn't store them).
+function ToolActivity({ steps }: { steps: ToolStep[] }) {
+  return (
+    <ol className="sfchat-tl" aria-live="polite">
+      {steps.map((s, i) => (
+        <li key={i} className={`sfchat-tl-step ${s.done ? 'done' : 'active'}`}>
+          <span className="sfchat-tl-node">
+            {s.done ? <Check size={11} strokeWidth={3} /> : <span className="sfchat-tl-spin" />}
+          </span>
+          <span className="sfchat-tl-label">{s.label}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -876,6 +971,51 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-li { display: block; padding-left: 14px; position: relative; }
 .sfchat-li::before { content: '•'; position: absolute; left: 2px; color: var(--accent); }
 
+/* Assistant column: the tool-activity panel stacked above the reply bubble, sharing the avatar row. */
+.sfchat-assistant-col { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; min-width: 0; max-width: 100%; }
+
+/* Tool activity: a flat timeline of the tools the assistant used — no card, sitting directly on the
+   panel body, aligned with the message content. A live spinner + shimmer while a step runs, a
+   checked node when it's done. Stays on screen after the turn, so a finished reply keeps the full
+   record of the tools it ran. (Its own class — not .sfchat-act, which is the header delete button.) */
+.sfchat-tl {
+  list-style: none; margin: 0; padding: 2px 2px 2px 0; max-width: 100%;
+  display: flex; flex-direction: column;
+  animation: sfchat-enter .34s cubic-bezier(.22,.61,.36,1) both;
+}
+.sfchat-tl-step { position: relative; display: flex; align-items: flex-start; gap: 11px; padding-bottom: 14px; animation: sfchat-tlin .34s cubic-bezier(.22,.61,.36,1) both; }
+.sfchat-tl-step:last-child { padding-bottom: 0; }
+/* Rail linking the nodes; fills accent behind a finished step. */
+.sfchat-tl-step:not(:last-child)::before { content: ''; position: absolute; left: 7px; top: 18px; bottom: -1px; width: 2px; border-radius: 2px; background: var(--line); transition: background .3s ease; }
+.sfchat-tl-step.done:not(:last-child)::before { background: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+@keyframes sfchat-tlin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.sfchat-tl-node { position: relative; z-index: 1; width: 16px; height: 16px; flex-shrink: 0; display: grid; place-items: center; margin-top: 1px; }
+/* Running: a rotating conic-gradient ring (masked to a ring). */
+.sfchat-tl-spin {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: conic-gradient(from 90deg, transparent 8%, color-mix(in srgb, var(--accent) 22%, transparent) 38%, var(--accent) 100%);
+  -webkit-mask: radial-gradient(closest-side, transparent 58%, #000 60%);
+          mask: radial-gradient(closest-side, transparent 58%, #000 60%);
+  animation: sfchat-spin .75s linear infinite;
+}
+@keyframes sfchat-spin { to { transform: rotate(1turn); } }
+/* Done: a filled accent disc with a check, popping in as it replaces the spinner. */
+.sfchat-tl-step.done .sfchat-tl-node { background: var(--accent); border-radius: 50%; color: #fff; animation: sfchat-nodepop .3s cubic-bezier(.34,1.56,.64,1) both; }
+.dark .sfchat-tl-step.done .sfchat-tl-node { color: #08272a; }
+@keyframes sfchat-nodepop { from { transform: scale(.5); } to { transform: scale(1); } }
+
+.sfchat-tl-label { font-size: 13px; line-height: 1.3; color: var(--text); padding-top: 1px; }
+.sfchat-tl-step.done .sfchat-tl-label { color: var(--muted); }
+/* Active step's label gets a shimmer sweep — the signature "working" cue. */
+.sfchat-tl-step.active .sfchat-tl-label {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--text) 30%, transparent) 32%, var(--text) 50%, color-mix(in srgb, var(--text) 30%, transparent) 68%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+  animation: sfchat-shimmer 1.5s linear infinite;
+}
+@keyframes sfchat-shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
+
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }
 
@@ -977,6 +1117,11 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
-  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm, .sfchat-gauge-fill, .sfchat-gauge-tip { transition: none; animation: none; }
+  body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm, .sfchat-gauge-fill, .sfchat-gauge-tip,
+  .sfchat-tl, .sfchat-tl-step, .sfchat-tl-step::before,
+  .sfchat-tl-spin, .sfchat-tl-step.done .sfchat-tl-node { transition: none; animation: none; }
+  /* The shimmer paints the label with transparent text; without the animation that would leave it
+     invisible, so restore a solid colour when motion is reduced. */
+  .sfchat-tl-step.active .sfchat-tl-label { background: none; -webkit-text-fill-color: currentColor; color: var(--text); }
 }
 `;
