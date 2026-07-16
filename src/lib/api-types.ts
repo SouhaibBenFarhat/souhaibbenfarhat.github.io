@@ -187,7 +187,7 @@ export interface components {
         };
         /** @description A tool step, for the frontend's activity animations. */
         ChatToolFrame: {
-            /** @description Tool name, e.g. get_facts, get_cv, list_github_projects, get_repo_readme. */
+            /** @description Tool name, e.g. get_facts, get_cv, list_documents, read_document, list_github_projects, get_repo_readme. */
             tool: string;
             /** @enum {string} */
             status: "start" | "end";
