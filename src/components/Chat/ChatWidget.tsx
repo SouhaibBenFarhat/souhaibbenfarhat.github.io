@@ -370,7 +370,9 @@ function ChatPanel() {
     setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [] }]);
     setBusy(true);
-    setStatus('thinking');
+    // No 'thinking' status: the empty assistant bubble already shows the typing dots, and a status
+    // line here would just duplicate it. The status line is reserved for the cold-start notice below.
+    setStatus(null);
 
     const setLastAssistant = (updater: (prev: string) => string) =>
       setMessages((m) => {
@@ -509,7 +511,9 @@ function ChatPanel() {
       }
 
       if (!res.ok || !res.body) throw new Error('Sorry, I’m having trouble right now.');
-      setStatus('thinking');
+      // Connected — clear any 'waking the assistant up…' notice. The typing dots carry it from here
+      // until the first tool or token arrives.
+      setStatus(null);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -668,7 +672,7 @@ function ChatPanel() {
           {!loadingHistory && welcomeArmed && (
             <div className="sfchat-row assistant sfchat-enter">
               <span className="sfchat-avatar sm"><AgentIcon /></span>
-              <div className="sfchat-bubble assistant">
+              <div className={`sfchat-bubble assistant ${welcome ? '' : 'sfchat-typing'}`}>
                 {welcome ? (
                   <>
                     <span dangerouslySetInnerHTML={{ __html: renderMarkdown(welcome) }} />
@@ -705,15 +709,17 @@ function ChatPanel() {
               const tools = m.tools ?? [];
               const turnActive = i === messages.length - 1 && busy;
               // Typing dots cover only the initial think before any tool appears; once a tool shows,
-              // the timeline is the indicator (dots here would flash on and off between steps).
-              const showTyping = turnActive && !m.content && tools.length === 0;
+              // the timeline is the indicator (dots here would flash on and off between steps). They
+              // also stand down while a status line is up (the cold-start notice), so the two don't
+              // both show at once.
+              const showTyping = turnActive && !m.content && tools.length === 0 && !status;
               return (
                 <div key={i} className="sfchat-row assistant sfchat-enter">
                   <span className="sfchat-avatar sm"><AgentIcon /></span>
                   <div className="sfchat-assistant-col">
                     {tools.length > 0 && <ToolActivity steps={tools} />}
                     {(showTyping || m.content) && (
-                      <div className="sfchat-bubble assistant">
+                      <div className={`sfchat-bubble assistant ${showTyping ? 'sfchat-typing' : ''}`}>
                         {showTyping ? (
                           <TypingDots />
                         ) : (
@@ -1042,6 +1048,15 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-chip svg { color: var(--muted); flex-shrink: 0; transition: transform .16s ease, color .16s ease; }
 .sfchat-chip:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--accent); }
 .sfchat-chip:hover svg { color: var(--accent); transform: translate(2px, -2px); }
+
+/* Dots-only bubble: a snug, symmetric pill sized and centred to the three dots — not the tall text
+   line-box (which left the baseline-aligned dots in a lopsided gap), and without the assistant tail
+   corner, whose sharp 5px top-left against the 15px right corners skews a pill this small sideways. */
+.sfchat-bubble.sfchat-typing {
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 12px 14px; border-radius: 14px;
+}
+.sfchat-bubble.sfchat-typing .sfchat-dots { padding: 0; }
 
 .sfchat-dots { display: inline-flex; gap: 4px; align-items: center; padding: 2px 0; }
 .sfchat-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: sfchat-bounce 1.2s ease-in-out infinite; }
