@@ -467,3 +467,139 @@ describe('ChatWidget — composer focus', () => {
     await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
   });
 });
+
+describe('ChatWidget — tool timeline', () => {
+  /** Render a fresh chat and wait for the panel to open (role queries can't see inside until then). */
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  /** The class on a step's <li> encodes its state: 'active' while it runs, 'done' once closed. */
+  const stepClass = (label: string) => screen.getByText(label).closest('li')?.className ?? '';
+
+  it('renders each tool step with the human-readable label from the frame', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+      { tool: 'get_facts', label: 'loading facts', status: 'end' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('loading facts')).not.toBeNull(), SETTLED);
+  });
+
+  it('prefers the frame label over the local tool-name map', async () => {
+    // A label the map would never produce, so it's clear which source won.
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'crunching the numbers', status: 'start' },
+      { tool: 'get_facts', label: 'crunching the numbers', status: 'end' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('crunching the numbers')).not.toBeNull(), SETTLED);
+    expect(screen.queryByText('loading facts')).toBeNull(); // did not fall back to the map
+  });
+
+  it('falls back to the tool-name map when a frame omits the label', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'read_document', status: 'start' }, // no label
+      { tool: 'read_document', status: 'end' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('reading a document')).not.toBeNull(), SETTLED);
+  });
+
+  it('shows a step as running until its end frame arrives', async () => {
+    // Hold the stream open right after the start frame, before its matching end.
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+    ];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('loading facts')).not.toBeNull(), SETTLED);
+    expect(stepClass('loading facts')).toContain('active');
+
+    releaseStream();
+  });
+
+  it('marks a step done once its end frame arrives', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+      { tool: 'get_facts', label: 'loading facts', status: 'end' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
+    expect(stepClass('loading facts')).toContain('done');
+  });
+
+  it('keeps the tool steps visible after the reply has finished streaming', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+      { tool: 'get_facts', label: 'loading facts', status: 'end' },
+      { text: 'All done.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('All done.')).not.toBeNull(), SETTLED);
+    // The finished reply keeps its record of the tools it used — the timeline does not collapse away.
+    expect(screen.getByText('loading facts')).not.toBeNull();
+  });
+
+  it('closes a still-running step if the turn ends without its end frame', async () => {
+    // The reply lands and the stream ends, but get_facts never got its `end` frame — the step must
+    // not be left spinning forever (closeOpenTools).
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+      { text: 'Partial.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Partial.')).not.toBeNull(), SETTLED);
+    await waitFor(() => expect(stepClass('loading facts')).toContain('done'), SETTLED);
+  });
+
+  it('shows no separate "thinking" status line — the typing dots are the only pending cue', async () => {
+    // Hold the stream open before any reply, to sit in the pending state.
+    streamFrames = [{ conversation_id: CID }];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    await openPanel();
+    sendMessage('hi');
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    // The old UI stacked a "thinking" status line under the typing-dots bubble; it's gone.
+    expect(screen.queryByText('thinking')).toBeNull();
+
+    releaseStream();
+  });
+});
