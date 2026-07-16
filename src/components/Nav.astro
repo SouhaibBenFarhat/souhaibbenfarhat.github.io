@@ -5,9 +5,11 @@ const initials = profile.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
 
 <header id="site-header" class="sticky top-0 z-40 border-b border-line/70 bg-bg/90 backdrop-blur-md">
   <nav class="wrap flex h-16 items-center justify-between gap-4">
-    <a href="#home" class="group flex items-center gap-2.5" aria-label="Back to top">
+    <a href="#home" class="group flex shrink-0 items-center gap-2.5" aria-label="Back to top">
       <span class="grid h-8 w-8 place-items-center rounded-full border border-line font-display text-sm text-accent transition-colors group-hover:border-accent">{initials}</span>
-      <span class="hidden font-display text-[0.95rem] sm:inline">{profile.name}</span>
+      {/* Show the name where there's room — below md (no inline nav yet) and at lg+ (wide) — but
+          hide it in the md–lg band, where the nav and CV button would otherwise squeeze it to a wrap. */}
+      <span class="hidden whitespace-nowrap font-display text-[0.95rem] sm:inline md:hidden lg:inline">{profile.name}</span>
     </a>
 
     <div class="flex items-center gap-1">
@@ -17,7 +19,7 @@ const initials = profile.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
         ))}
       </ul>
 
-      <a href={profile.cv} class="btn-solid ml-1 hidden sm:inline-flex" download>
+      <a href={profile.cv} class="btn-solid ml-1 hidden shrink-0 whitespace-nowrap sm:inline-flex" download>
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg>
         Download CV
       </a>
