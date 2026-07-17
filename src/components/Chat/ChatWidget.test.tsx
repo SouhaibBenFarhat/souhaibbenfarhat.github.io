@@ -794,3 +794,26 @@ describe('ChatWidget — answering model', () => {
     expect(document.querySelector('.sfchat-model')).toBeNull();
   });
 });
+
+describe('ChatWidget — collapse and reopen', () => {
+  it('reopens from the FAB after being minimized', async () => {
+    render(<ChatWidget />);
+    // Auto-open makes the panel interactive — its Minimize button enters the a11y tree.
+    fireEvent.click(await screen.findByRole('button', { name: 'Minimize' }));
+    // Collapsed: the panel is aria-hidden, so its controls leave the a11y tree.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull());
+    // Clicking the FAB must bring it back.
+    fireEvent.click(screen.getByRole('button', { name: 'Open the assistant' }));
+    expect(await screen.findByRole('button', { name: 'Minimize' })).not.toBeNull();
+  });
+
+  it('gates the composer pointer-events on the open panel, so it cannot swallow FAB clicks', () => {
+    // The bug was CSS-only: a collapsed panel is pointer-events:none but still laid out over the FAB,
+    // and an unscoped `pointer-events: auto` kept the invisible composer clickable, eating the click
+    // that reopens the panel. jsdom can't hit-test CSS, so guard the fix at its source — the override
+    // must be scoped under `.sfchat-open`.
+    render(<ChatWidget />);
+    const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
+    expect(css).toMatch(/\.sfchat-open\s+\.sfchat-composer[^{]*\{[^}]*pointer-events:\s*auto/);
+  });
+});
