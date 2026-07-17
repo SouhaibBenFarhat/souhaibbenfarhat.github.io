@@ -1300,7 +1300,10 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
   padding: 26px 14px 14px; pointer-events: none;
   background: linear-gradient(to top, var(--bg) 78%, transparent);
 }
-.sfchat-composer, .sfchat-queue-wrap, .sfchat-spent { pointer-events: auto; }
+/* Scoped to the OPEN panel: a collapsed panel is pointer-events:none but still laid out over the
+   FAB (just opacity:0). Left unscoped, these auto overrides keep the invisible composer clickable,
+   and since it sits above the FAB it swallows the click that should reopen the panel. */
+.sfchat-open .sfchat-composer, .sfchat-open .sfchat-queue-wrap, .sfchat-open .sfchat-spent { pointer-events: auto; }
 
 /* "Jump to latest": appears when the user has scrolled up (auto-scroll disengaged), floating centred
    just above the composer. Clicking it re-engages the follow-the-bottom behaviour. */
