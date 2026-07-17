@@ -761,54 +761,36 @@ describe('ChatWidget — answering model', () => {
     await screen.findByRole('button', { name: 'Minimize' });
   }
 
-  it('labels the answering model from the model frame', async () => {
+  /** Stream a turn that reports `model` (or none), and wait for the reply to land. */
+  async function answerWithModel(model: string | null) {
     streamFrames = [
       { conversation_id: CID },
-      { model: 'mistral/mistral-small-latest' },
+      ...(model ? [{ model }] : []),
       { text: 'Answer.' },
       { done: true },
     ];
     await openPanel();
     sendMessage('hi');
-
     await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
-    expect(screen.getByText('Mistral Small')).not.toBeNull();
+  }
+
+  it('labels a known model with its friendly name', async () => {
+    await answerWithModel('mistral/open-mistral-nemo');
+    expect(screen.getByText('Mistral Nemo')).not.toBeNull();
   });
 
-  it('falls back to the provider name for an unmapped model of a known provider', async () => {
-    streamFrames = [
-      { conversation_id: CID },
-      { model: 'gemini/gemini-9.9-turbo' }, // not in the map, but recognisably Gemini
-      { text: 'Answer.' },
-      { done: true },
-    ];
-    await openPanel();
-    sendMessage('hi');
-
-    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
-    expect(screen.getByText('Gemini')).not.toBeNull();
+  it('maps the other available models too', async () => {
+    await answerWithModel('zai/glm-4.7-flash');
+    expect(screen.getByText('GLM 4.7 Flash')).not.toBeNull();
   });
 
-  it('falls back to a generic label for an unrecognised model', async () => {
-    streamFrames = [
-      { conversation_id: CID },
-      { model: 'acme/mystery-model-9000' },
-      { text: 'Answer.' },
-      { done: true },
-    ];
-    await openPanel();
-    sendMessage('hi');
-
-    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
-    expect(screen.getByText('AI model')).not.toBeNull();
+  it('shows the raw id verbatim for an unmapped model — no static fallback', async () => {
+    await answerWithModel('acme/mystery-model-9000');
+    expect(screen.getByText('acme/mystery-model-9000')).not.toBeNull();
   });
 
   it('shows no model caption when the turn reports no model', async () => {
-    streamFrames = [{ conversation_id: CID }, { text: 'Answer.' }, { done: true }];
-    await openPanel();
-    sendMessage('hi');
-
-    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
-    expect(screen.queryByText('AI model')).toBeNull();
+    await answerWithModel(null);
+    expect(document.querySelector('.sfchat-model')).toBeNull();
   });
 });

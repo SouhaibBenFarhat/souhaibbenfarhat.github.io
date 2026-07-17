@@ -20,26 +20,16 @@ const TOOL_LABELS: Record<string, string> = {
   get_repo_readme: 'reading the project',
 };
 
-// LiteLLM model ids → friendly names. The backend names the answering model once per turn (a
-// ChatModelFrame). An id that isn't listed here falls back to its provider name, and an unrecognised
-// provider to a generic label — the user never sees a cryptic raw id.
+// LiteLLM model ids → friendly names, for the models the backend actually has configured. An id
+// that isn't listed here shows verbatim (see modelLabel), so a new/unknown model is still named
+// honestly rather than hidden behind a generic label — just add it here to prettify it.
 const MODEL_NAMES: Record<string, string> = {
+  'zai/glm-4.7-flash': 'GLM 4.7 Flash',
   'mistral/mistral-small-latest': 'Mistral Small',
-  'mistral/mistral-medium-latest': 'Mistral Medium',
-  'mistral/mistral-large-latest': 'Mistral Large',
-  'gemini/gemini-1.5-flash': 'Gemini 1.5 Flash',
-  'gemini/gemini-1.5-pro': 'Gemini 1.5 Pro',
-  'gemini/gemini-2.0-flash': 'Gemini 2.0 Flash',
-  'gemini/gemini-2.5-flash': 'Gemini 2.5 Flash',
-  'gemini/gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'mistral/open-mistral-nemo': 'Mistral Nemo',
 };
-const MODEL_FALLBACK = 'AI model';
 function modelLabel(id: string): string {
-  if (MODEL_NAMES[id]) return MODEL_NAMES[id];
-  const lower = id.toLowerCase();
-  if (lower.includes('gemini')) return 'Gemini';
-  if (lower.includes('mistral')) return 'Mistral';
-  return MODEL_FALLBACK;
+  return MODEL_NAMES[id] ?? id; // unknown model → show its raw id, not a static fallback
 }
 
 // A tool step the assistant took while answering. Shown in the message as it happens (a pulsing
