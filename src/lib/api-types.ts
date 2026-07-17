@@ -101,7 +101,7 @@ export interface paths {
          * Stream an assistant reply (Server-Sent Events)
          * @description Runs the LangGraph agent and streams its reply as `text/event-stream`.
          *
-         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
+         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then a `ChatModelFrame` naming the answering model, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
          */
         post: operations["chat_stream_create"];
         delete?: never;
@@ -181,6 +181,10 @@ export interface components {
             /** Format: uuid */
             conversation_id: string;
         };
+        /** @description Names the model answering this turn — its LiteLLM id, e.g. "mistral/mistral-small-latest". Sent once, before the reply; the client maps it to a display name. Omitted when the provider doesn't report a model. */
+        ChatModelFrame: {
+            model: string;
+        };
         /** @description A chunk of the assistant's answer. */
         ChatTextFrame: {
             text: string;
@@ -211,7 +215,7 @@ export interface components {
             done: true;
         };
         /** @description One Server-Sent Events frame. Each `data:` line is one of these. */
-        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
+        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatModelFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
     };
     responses: never;
     parameters: never;
