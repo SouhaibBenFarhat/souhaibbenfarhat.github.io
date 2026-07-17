@@ -198,9 +198,12 @@ export interface components {
         ChatUsageFrame: {
             usage: components["schemas"]["ChatUsage"];
         };
-        /** @description Sent only if every model failed before any text streamed. */
+        /** @description The turn failed. Can arrive after some answer text has already streamed (a failure on the step after a tool call), so treat it as ending the turn, not as replacing what was shown. */
         ChatErrorFrame: {
+            /** @description A friendly message safe to show any visitor. */
             error: string;
+            /** @description The raw technical cause (the provider exception), for the owner to diagnose from. Show only in internal/owner mode, never to the public. May be absent. */
+            detail?: string;
         };
         /** @description Always the final frame. */
         ChatDoneFrame: {
