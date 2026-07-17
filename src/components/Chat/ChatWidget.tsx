@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Cpu, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -20,6 +20,28 @@ const TOOL_LABELS: Record<string, string> = {
   get_repo_readme: 'reading the project',
 };
 
+// LiteLLM model ids → friendly names. The backend names the answering model once per turn (a
+// ChatModelFrame). An id that isn't listed here falls back to its provider name, and an unrecognised
+// provider to a generic label — the user never sees a cryptic raw id.
+const MODEL_NAMES: Record<string, string> = {
+  'mistral/mistral-small-latest': 'Mistral Small',
+  'mistral/mistral-medium-latest': 'Mistral Medium',
+  'mistral/mistral-large-latest': 'Mistral Large',
+  'gemini/gemini-1.5-flash': 'Gemini 1.5 Flash',
+  'gemini/gemini-1.5-pro': 'Gemini 1.5 Pro',
+  'gemini/gemini-2.0-flash': 'Gemini 2.0 Flash',
+  'gemini/gemini-2.5-flash': 'Gemini 2.5 Flash',
+  'gemini/gemini-2.5-pro': 'Gemini 2.5 Pro',
+};
+const MODEL_FALLBACK = 'AI model';
+function modelLabel(id: string): string {
+  if (MODEL_NAMES[id]) return MODEL_NAMES[id];
+  const lower = id.toLowerCase();
+  if (lower.includes('gemini')) return 'Gemini';
+  if (lower.includes('mistral')) return 'Mistral';
+  return MODEL_FALLBACK;
+}
+
 // A tool step the assistant took while answering. Shown in the message as it happens (a pulsing
 // dot) and kept afterwards as a record of what it did (a check). `done` flips on the tool's `end`
 // frame. Attached to the message locally — the restore endpoint doesn't persist tool steps, so
@@ -27,7 +49,7 @@ const TOOL_LABELS: Record<string, string> = {
 type ToolStep = { tool: string; label: string; done: boolean };
 // `errored` marks a turn whose stream failed, so a Retry control renders under it. The error text
 // itself lives in `content` (surfaced inline), so it survives in the message list like any reply.
-type ChatMessage = Message & { tools?: ToolStep[]; errored?: boolean };
+type ChatMessage = Message & { tools?: ToolStep[]; errored?: boolean; model?: string };
 
 const WELCOME =
   "Hey 👋 I'm Souhaib's assistant. Ask me about his projects, experience, skills, or " +
@@ -464,6 +486,16 @@ function ChatPanel() {
         return copy;
       });
 
+    // Record which model answered this turn (a ChatModelFrame, sent once before the reply). Kept on
+    // the message so the label persists for the session — the restore endpoint doesn't store it.
+    const setLastModel = (model: string) =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, model };
+        return copy;
+      });
+
     // Close any step still marked running when the turn ends. Normally every tool got its `end`
     // frame before the text streamed, so this is a no-op; it just stops a spinner outliving the
     // turn if the stream is cut short or errors mid-tool.
@@ -605,6 +637,9 @@ function ChatPanel() {
             addToolStep(data.tool, data.label ?? TOOL_LABELS[data.tool] ?? 'Working…');
           }
           if (data.tool && data.status === 'end') finishToolStep(data.tool);
+          // Names the model answering this turn (sent once, before the reply). Kept on the message
+          // and shown as a small caption; absent when the provider didn't report a model.
+          if (data.model) setLastModel(data.model);
           // One frame per turn, just before `done`. It carries the thread's context size as
           // of now — it already includes every earlier turn, so it replaces the last value
           // rather than adding to it. Absent when the provider reported no usage: keep what
@@ -851,6 +886,12 @@ function ChatPanel() {
                           <span dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
                         )}
                       </div>
+                    )}
+                    {m.model && (
+                      <span className="sfchat-model">
+                        <Cpu size={11} strokeWidth={2} />
+                        {modelLabel(m.model)}
+                      </span>
                     )}
                     {m.errored && i === messages.length - 1 && !busy && !exhausted && (
                       <button type="button" className="sfchat-retry" onClick={() => retryFrom(i)}>
@@ -1181,6 +1222,10 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-tl-step.done .sfchat-tl-node { background: var(--accent); border-radius: 50%; color: #fff; animation: sfchat-nodepop .3s cubic-bezier(.34,1.56,.64,1) both; }
 .dark .sfchat-tl-step.done .sfchat-tl-node { color: #08272a; }
 @keyframes sfchat-nodepop { from { transform: scale(.5); } to { transform: scale(1); } }
+
+/* Answering-model caption: a quiet line under the reply naming the model that produced it. */
+.sfchat-model { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted); padding-left: 2px; }
+.sfchat-model svg { opacity: .75; }
 
 .sfchat-tl-label { font-size: 13px; line-height: 1.3; color: var(--text); padding-top: 1px; }
 .sfchat-tl-step.done .sfchat-tl-label { color: var(--muted); }
