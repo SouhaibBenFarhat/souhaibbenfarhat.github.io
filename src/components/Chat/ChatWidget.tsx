@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
 
@@ -222,12 +222,16 @@ function ChatPanel() {
   // Prompts typed while a reply is still streaming. They fire automatically, in order, one per
   // completed turn (see the drain effect below). Shown as a removable list above the composer.
   const [queue, setQueue] = useState<string[]>([]);
+  // Measured height of the floating composer bar. The list reserves this much space at its bottom so
+  // the newest message rests just above the composer rather than hiding behind it.
+  const [barH, setBarH] = useState(0);
   const conversationId = useRef<string | null>(storedId);
   const seeded = useRef(false);
   const confirmRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const revealRaf = useRef<number | null>(null);
+  const barRO = useRef<ResizeObserver | null>(null);
   const welcomeDone = welcome.length >= WELCOME.length;
 
   const restore = useConversation(storedId);
@@ -249,6 +253,21 @@ function ChatPanel() {
     setUsage(null); // a new thread's context is unknown again, not zero
     setQueue([]); // queued prompts belong to the thread being left, not the fresh one
   };
+
+  // Track the floating composer's height so the list can pad its bottom to match — keeping it in sync
+  // as the bar grows (a taller textarea, the queue appearing, the spent panel swapping in). A callback
+  // ref re-observes across those element swaps; ResizeObserver is absent under jsdom, so guard it.
+  const setBar = useCallback((el: HTMLElement | null) => {
+    barRO.current?.disconnect();
+    barRO.current = null;
+    if (!el) return;
+    const measure = () => setBarH(el.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    barRO.current = new ResizeObserver(measure);
+    barRO.current.observe(el);
+  }, []);
+  useEffect(() => () => barRO.current?.disconnect(), []);
 
   // Stop the reveal loop if the widget unmounts mid-stream.
   useEffect(() => () => {
@@ -737,7 +756,12 @@ function ChatPanel() {
           </div>
         </header>
 
-        <div className="sfchat-list" ref={listRef}>
+        <div
+          className="sfchat-list"
+          ref={listRef}
+          // Reserve room for the floating composer so the last message clears it, not hides behind it.
+          style={barH ? { paddingBottom: barH + 8 } : undefined}
+        >
           {loadingHistory && <ChatSkeleton />}
 
           {!loadingHistory && welcomeArmed && (
@@ -825,7 +849,7 @@ function ChatPanel() {
         {exhausted ? (
           // Nothing more can be sent to a spent thread, so a composer would only be a dead
           // end. Offer the way forward instead — and say plainly that it clears this one.
-          <div className="sfchat-composer-wrap">
+          <div className="sfchat-composer-wrap" ref={setBar}>
             <div className="sfchat-spent" role="status">
               <p className="sfchat-spent-title">This chat is full.</p>
               <p className="sfchat-spent-sub">
@@ -847,6 +871,7 @@ function ChatPanel() {
         ) : (
           <form
             className="sfchat-composer-wrap"
+            ref={setBar}
             onSubmit={(e) => {
               e.preventDefault();
               send(input);
@@ -1185,7 +1210,17 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-statustext i:nth-child(4) { animation-delay: .3s; }
 
 /* Floating composer: a larger elevated box on the body — no footer bar. */
-.sfchat-composer-wrap { padding: 14px; flex-shrink: 0; }
+/* Floating composer: overlays the bottom of the message list instead of sitting in its own row, so
+   there's no hard divider clipping the last bubble. Messages scroll up behind it and dissolve into a
+   scrim — the panel bg, fading to transparent at the very top edge. pointer-events are off on the
+   scrim so the messages under it still scroll, and back on for the composer itself (below). The list
+   reserves this bar's height (barH) so the newest message rests just above it. */
+.sfchat-composer-wrap {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  padding: 26px 14px 14px; pointer-events: none;
+  background: linear-gradient(to top, var(--bg) 78%, transparent);
+}
+.sfchat-composer, .sfchat-queue-wrap, .sfchat-spent { pointer-events: auto; }
 .sfchat-composer { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 8px 8px 0; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 .sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
