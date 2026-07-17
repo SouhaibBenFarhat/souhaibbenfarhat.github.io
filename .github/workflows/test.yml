@@ -1,7 +1,8 @@
 name: Tests
 
-# Runs the Vitest suite on every PR and on pushes to main. Kept separate from the deploy
-# workflow so a red test is visible on the PR, before it can reach main.
+# Type-checks, runs the Vitest suite, and builds on every PR and on pushes to main. Kept separate
+# from the deploy workflow so a red check is visible on the PR, before it can reach main. `astro build`
+# transpiles but does NOT fail on type errors, so the explicit `astro check` step is what guards types.
 
 on:
   push:
@@ -28,6 +29,9 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
 
       - name: Run tests
         run: npm test

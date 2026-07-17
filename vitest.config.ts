@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
-// Standalone vite config rather than Astro's getViteConfig: the only things under test are
-// plain React islands, so the default JSX transform is all that's needed — no Astro or
-// Tailwind pipeline, and no coupling to their vite versions.
+// Standalone vite config rather than Astro's getViteConfig: the only things under test are plain
+// React islands — no Astro or Tailwind pipeline, and no coupling to their vite versions. JSX is
+// transformed per the root tsconfig (jsx: react-jsx), which Vitest's transform reads directly.
 export default defineConfig({
   test: {
     environment: 'jsdom',
