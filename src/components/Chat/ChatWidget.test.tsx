@@ -603,3 +603,82 @@ describe('ChatWidget — tool timeline', () => {
     releaseStream();
   });
 });
+
+describe('ChatWidget — streaming errors', () => {
+  /** Render a fresh chat and wait for the panel to open (role queries can't see inside until then). */
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  it('surfaces the error message and the raw detail from an error frame', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { error: 'The assistant hit a snag.', detail: 'ProviderError: upstream 500' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    // The friendly message replaces the old generic apology...
+    await waitFor(() => expect(screen.getByText('⚠️ The assistant hit a snag.')).not.toBeNull(), SETTLED);
+    // ...and the owner-only raw cause is shown for diagnosis (the whole panel is owner-gated).
+    expect(screen.getByText('ProviderError: upstream 500')).not.toBeNull();
+  });
+
+  it('shows just the message when the error frame carries no detail', async () => {
+    streamFrames = [{ conversation_id: CID }, { error: 'Something broke.' }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('⚠️ Something broke.')).not.toBeNull(), SETTLED);
+  });
+
+  it('keeps a partial answer and appends the error below it', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'Here is the start of an answer.' },
+      { error: 'Then it failed.', detail: 'boom' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    // An error can arrive after text has streamed; the partial answer must not be thrown away.
+    await waitFor(() => expect(screen.getByText('boom')).not.toBeNull(), SETTLED);
+    const bubble = screen.getByText('boom').closest('.sfchat-bubble');
+    expect(bubble?.textContent).toContain('Here is the start of an answer.');
+    expect(bubble?.textContent).toContain('Then it failed.');
+  });
+
+  it('offers a Retry that re-sends the failed message and shows the recovered reply', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { error: 'Temporary glitch.', detail: 'timeout' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('ask something');
+
+    const retry = await screen.findByRole('button', { name: 'Retry' }, SETTLED);
+    expect(streamCalls()).toHaveLength(1);
+
+    // The backend recovers on the next attempt.
+    streamFrames = [{ conversation_id: CID }, { text: 'Recovered answer.' }, { done: true }];
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(screen.getByText('Recovered answer.')).not.toBeNull(), SETTLED);
+    // A second stream was opened, and the failed turn was replaced rather than stacked on top.
+    expect(streamCalls()).toHaveLength(2);
+    expect(screen.queryByText('timeout')).toBeNull();
+  });
+
+  it('offers no Retry on a turn that streamed cleanly', async () => {
+    streamFrames = [{ conversation_id: CID }, { text: 'All good.' }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('All good.')).not.toBeNull(), SETTLED);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+});
