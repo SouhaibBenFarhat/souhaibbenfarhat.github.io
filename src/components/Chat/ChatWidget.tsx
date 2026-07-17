@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, Trash2 } from 'lucide-react';
+import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2 } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -25,7 +25,9 @@ const TOOL_LABELS: Record<string, string> = {
 // frame. Attached to the message locally — the restore endpoint doesn't persist tool steps, so
 // they survive the turn but not a reload.
 type ToolStep = { tool: string; label: string; done: boolean };
-type ChatMessage = Message & { tools?: ToolStep[] };
+// `errored` marks a turn whose stream failed, so a Retry control renders under it. The error text
+// itself lives in `content` (surfaced inline), so it survives in the message list like any reply.
+type ChatMessage = Message & { tools?: ToolStep[]; errored?: boolean };
 
 const WELCOME =
   "Hey 👋 I'm Souhaib's assistant. Ask me about his projects, experience, skills, or " +
@@ -68,6 +70,15 @@ function renderMarkdown(src: string): string {
   );
   s = s.replace(/^[-*] (.+)$/gm, '<span class="sfchat-li">$1</span>');
   return s.replace(/\n/g, '<br>');
+}
+
+// Inline error text for the assistant bubble: the friendly message on its own line, and — for a
+// backend error frame — the raw technical `detail` in a code block below it, so a multi-line
+// provider exception stays legible. `detail` is an owner-only field, which is safe here because the
+// whole panel is owner-gated (?internal=1). No detail (or a transport error) → just the message.
+function formatStreamError(message: string, detail?: string): string {
+  const friendly = `⚠️ ${message}`;
+  return detail ? `${friendly}\n\n\`\`\`\n${detail}\n\`\`\`` : friendly;
 }
 
 function TypingDots() {
@@ -420,6 +431,15 @@ function ChatPanel() {
         return copy;
       });
 
+    // Mark the current assistant turn as failed, so a Retry control renders under its bubble.
+    const markLastErrored = () =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, errored: true };
+        return copy;
+      });
+
     // --- Smooth reveal: buffer incoming tokens and paint them at a steady pace ---
     let pending = ''; // tokens received but not yet shown on screen
     let netDone = false; // the network stream has finished
@@ -550,9 +570,19 @@ function ChatPanel() {
             pending += data.text; // reveal loop paints it at a steady pace
             ensureDraining();
           }
+          // A backend error frame. Surface it instead of a generic apology: the friendly `error`
+          // message plus the raw `detail` (owner-only) for diagnosis. It can arrive after some
+          // answer already streamed, so flush what's buffered and append the error below it rather
+          // than replacing it; mark the turn so a Retry control appears.
           if (data.error) {
+            const flushed = pending;
             pending = '';
-            setLastAssistant(() => '⚠️ Sorry — I couldn’t answer that. Please try again.');
+            const errText = formatStreamError(data.error, data.detail);
+            setLastAssistant((prev) => {
+              const base = prev + flushed;
+              return base ? `${base}\n\n${errText}` : errText;
+            });
+            markLastErrored();
           }
         }
       }
@@ -564,10 +594,22 @@ function ChatPanel() {
         revealRaf.current = null;
       }
       const msg = err instanceof Error ? err.message : 'Something went wrong.';
-      setLastAssistant(() => '⚠️ ' + msg);
+      // Transport/other failure — a JS error, not a backend frame, so there's no `detail`. Keep any
+      // partial answer and append the message below it; mark the turn so a Retry control appears.
+      setLastAssistant((prev) => (prev ? `${prev}\n\n⚠️ ${msg}` : `⚠️ ${msg}`));
+      markLastErrored();
       finish();
     }
   }
+
+  // Re-send the message whose reply failed. Drop the failed user+assistant pair, then hand the text
+  // back to `send`, which re-appends the pair and opens a fresh stream on the same conversation.
+  const retryFrom = (assistantIndex: number) => {
+    const userMsg = messages[assistantIndex - 1];
+    if (!userMsg || userMsg.role !== 'user') return;
+    setMessages((m) => m.slice(0, assistantIndex - 1));
+    send(userMsg.content);
+  };
 
   const idle = messages.length === 0;
   // Nothing to delete on a fresh, empty chat.
@@ -727,6 +769,12 @@ function ChatPanel() {
                         )}
                       </div>
                     )}
+                    {m.errored && i === messages.length - 1 && !busy && !exhausted && (
+                      <button type="button" className="sfchat-retry" onClick={() => retryFrom(i)}>
+                        <RetryIcon />
+                        Retry
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -843,6 +891,9 @@ function MinIcon() {
 }
 function TrashIcon() {
   return <Trash2 size={16} strokeWidth={2} />;
+}
+function RetryIcon() {
+  return <RotateCcw size={13} strokeWidth={2} />;
 }
 function SendIcon() {
   return <ArrowUp size={18} strokeWidth={2.25} />;
@@ -1021,6 +1072,19 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
   animation: sfchat-shimmer 1.5s linear infinite;
 }
 @keyframes sfchat-shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
+
+/* Retry: a quiet control under a failed turn's bubble, re-sending the message whose reply errored.
+   Neutral by default (it's a recovery, not a warning), warming to accent on hover like the chips. */
+.sfchat-retry {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px;
+  background: transparent; color: var(--muted);
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.sfchat-retry:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sfchat-retry svg { flex-shrink: 0; }
 
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }
