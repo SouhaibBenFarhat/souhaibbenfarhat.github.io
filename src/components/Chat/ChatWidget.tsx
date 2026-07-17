@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -219,12 +219,22 @@ function ChatPanel() {
   // Bumped after a delete so the greeting replays even though `welcomeArmed` was already true.
   const [welcomeRun, setWelcomeRun] = useState(0);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Prompts typed while a reply is still streaming. They fire automatically, in order, one per
+  // completed turn (see the drain effect below). Shown as a removable list above the composer.
+  const [queue, setQueue] = useState<string[]>([]);
+  // Measured height of the floating composer bar. The list reserves this much space at its bottom so
+  // the newest message rests just above the composer rather than hiding behind it.
+  const [barH, setBarH] = useState(0);
+  // "Jump to latest" button — shown once the user scrolls up off the bottom (auto-scroll disengaged).
+  const [showJump, setShowJump] = useState(false);
   const conversationId = useRef<string | null>(storedId);
   const seeded = useRef(false);
   const confirmRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const revealRaf = useRef<number | null>(null);
+  const barRO = useRef<ResizeObserver | null>(null);
+  const stuckRef = useRef(true); // is auto-scroll following the bottom? false once the user scrolls up
   const welcomeDone = welcome.length >= WELCOME.length;
 
   const restore = useConversation(storedId);
@@ -244,7 +254,23 @@ function ChatPanel() {
     setStoredId(null);
     setWelcomeArmed(true);
     setUsage(null); // a new thread's context is unknown again, not zero
+    setQueue([]); // queued prompts belong to the thread being left, not the fresh one
   };
+
+  // Track the floating composer's height so the list can pad its bottom to match — keeping it in sync
+  // as the bar grows (a taller textarea, the queue appearing, the spent panel swapping in). A callback
+  // ref re-observes across those element swaps; ResizeObserver is absent under jsdom, so guard it.
+  const setBar = useCallback((el: HTMLElement | null) => {
+    barRO.current?.disconnect();
+    barRO.current = null;
+    if (!el) return;
+    const measure = () => setBarH(el.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    barRO.current = new ResizeObserver(measure);
+    barRO.current.observe(el);
+  }, []);
+  useEffect(() => () => barRO.current?.disconnect(), []);
 
   // Stop the reveal loop if the widget unmounts mid-stream.
   useEffect(() => () => {
@@ -324,6 +350,7 @@ function ChatPanel() {
   }, [welcomeArmed, welcomeRun]);
 
   useEffect(() => {
+    if (!stuckRef.current) return; // the user scrolled up — don't drag them back to the bottom
     // While streaming, the text grows a few chars per frame — an instant scroll pins
     // to the bottom and reads as one continuous glide. Smooth-scrolling here would
     // restart its animation every frame and stutter. Use smooth only for one-off jumps.
@@ -332,6 +359,27 @@ function ChatPanel() {
       behavior: busy ? 'auto' : 'smooth',
     });
   }, [messages, status, welcome, open, busy]);
+
+  // Auto-scroll follows the newest content only while the user is at the bottom. Scrolling up — to
+  // re-read something while the agent streams, say — disengages it, so tokens stop yanking the view
+  // down; scrolling back to the bottom re-engages it. `stuckRef` is a ref so it costs no re-render per
+  // frame; `showJump` only flips React state when the boundary is actually crossed.
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    stuckRef.current = atBottom;
+    setShowJump(!atBottom);
+  };
+
+  /** Re-engage auto-scroll and glide to the newest message. */
+  const jumpToLatest = () => {
+    const el = listRef.current;
+    if (!el) return;
+    stuckRef.current = true;
+    setShowJump(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   // Dismiss the confirm popover on Escape or a click outside it.
   useEffect(() => {
@@ -370,14 +418,11 @@ function ChatPanel() {
     del.reset();
   }, [del.isSuccess, deleting]);
 
-  async function send(text: string) {
+  // Execute one streaming turn. Doesn't touch the composer or the queue — the caller (a direct send,
+  // a retry, or the queue drain) owns those. Only ever invoked when the agent is free.
+  async function streamTurn(text: string) {
     text = text.trim();
-    if (!text || busy || usage?.exhausted) return;
-    setInput('');
-    // Sending from the send button or a suggestion chip leaves focus on a control that is about
-    // to disable itself (or unmount), which would drop the caret on <body>. Put it back in the
-    // composer so the next question can just be typed. A no-op when Enter sent the message.
-    fieldRef.current?.focus();
+    if (!text || usage?.exhausted) return;
     setConfirmingDelete(false);
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [] }]);
     setBusy(true);
@@ -602,13 +647,29 @@ function ChatPanel() {
     }
   }
 
-  // Re-send the message whose reply failed. Drop the failed user+assistant pair, then hand the text
-  // back to `send`, which re-appends the pair and opens a fresh stream on the same conversation.
+  // Composer submit: stream the turn now if the agent is free, otherwise queue it to fire when the
+  // current reply finishes (the drain effect). Always clears the composer and keeps the caret there,
+  // so the next prompt can be typed straight away — including while a reply is still streaming.
+  const send = (text: string) => {
+    text = text.trim();
+    if (!text || usage?.exhausted) return;
+    setInput('');
+    fieldRef.current?.focus();
+    stuckRef.current = true; // submitting re-engages auto-scroll, so the reply is followed
+    setShowJump(false);
+    if (busy) setQueue((q) => [...q, text]);
+    else streamTurn(text);
+  };
+
+  // Re-send the message whose reply failed. Drop the failed user+assistant pair, then stream it
+  // again on the same conversation. Retry only shows when the agent is free, so it never queues.
   const retryFrom = (assistantIndex: number) => {
     const userMsg = messages[assistantIndex - 1];
     if (!userMsg || userMsg.role !== 'user') return;
     setMessages((m) => m.slice(0, assistantIndex - 1));
-    send(userMsg.content);
+    stuckRef.current = true;
+    setShowJump(false);
+    streamTurn(userMsg.content);
   };
 
   const idle = messages.length === 0;
@@ -619,6 +680,22 @@ function ChatPanel() {
   // *next* send is refused, and "start a new chat" must not be reachable mid-stream — deleting
   // there would clear the messages the reveal loop is still writing into.
   const exhausted = usage?.exhausted === true && !busy;
+
+  // Drain the queue: the moment the agent is free, send everything queued as ONE combined follow-up
+  // turn (newline-joined), the way Claude Code batches messages typed while it's working — not as
+  // separate turns. Guarded on !busy — streamTurn's own setBusy(true) re-runs this effect and the
+  // guard stops a double-send. Anything queued *during* that combined turn becomes the next batch.
+  useEffect(() => {
+    if (busy || exhausted || queue.length === 0) return;
+    setQueue([]);
+    streamTurn(queue.join('\n'));
+  }, [busy, exhausted, queue]);
+
+  // A spent thread refuses everything, so anything still queued would never send — drop it rather
+  // than leave it dangling behind the "chat is full" panel.
+  useEffect(() => {
+    if (exhausted && queue.length) setQueue([]);
+  }, [exhausted, queue.length]);
 
   return (
     <>
@@ -708,7 +785,13 @@ function ChatPanel() {
           </div>
         </header>
 
-        <div className="sfchat-list" ref={listRef}>
+        <div
+          className="sfchat-list"
+          ref={listRef}
+          onScroll={onListScroll}
+          // Reserve room for the floating composer so the last message clears it, not hides behind it.
+          style={barH ? { paddingBottom: barH + 8 } : undefined}
+        >
           {loadingHistory && <ChatSkeleton />}
 
           {!loadingHistory && welcomeArmed && (
@@ -793,10 +876,22 @@ function ChatPanel() {
           )}
         </div>
 
+        {showJump && (
+          <button
+            type="button"
+            className="sfchat-jump"
+            style={{ bottom: (barH || 64) + 8 }}
+            onClick={jumpToLatest}
+            aria-label="Scroll to latest"
+          >
+            <JumpIcon />
+          </button>
+        )}
+
         {exhausted ? (
           // Nothing more can be sent to a spent thread, so a composer would only be a dead
           // end. Offer the way forward instead — and say plainly that it clears this one.
-          <div className="sfchat-composer-wrap">
+          <div className="sfchat-composer-wrap" ref={setBar}>
             <div className="sfchat-spent" role="status">
               <p className="sfchat-spent-title">This chat is full.</p>
               <p className="sfchat-spent-sub">
@@ -818,11 +913,32 @@ function ChatPanel() {
         ) : (
           <form
             className="sfchat-composer-wrap"
+            ref={setBar}
             onSubmit={(e) => {
               e.preventDefault();
               send(input);
             }}
           >
+            {queue.length > 0 && (
+              <div className="sfchat-queue-wrap">
+                <p className="sfchat-queue-cap">Up next · sends automatically</p>
+                <ol className="sfchat-queue" aria-label="Queued prompts">
+                  {queue.map((q, i) => (
+                    <li key={i} className="sfchat-queue-item">
+                      <span className="sfchat-queue-text">{q}</span>
+                      <button
+                        type="button"
+                        className="sfchat-queue-remove"
+                        onClick={() => setQueue((cur) => cur.filter((_, j) => j !== i))}
+                        aria-label={`Remove queued prompt: ${q}`}
+                      >
+                        <QueueRemoveIcon />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
             <div className="sfchat-composer">
               <div className="sfchat-composer-row">
                 <textarea
@@ -837,14 +953,12 @@ function ChatPanel() {
                       send(input);
                     }
                   }}
-                  placeholder="Ask about Souhaib…"
+                  placeholder={busy ? 'Queue another message…' : 'Ask about Souhaib…'}
                   aria-label="Your message"
-                  // Not `disabled`: a disabled control can't hold focus, so the browser blurs it
-                  // and the caret lands on <body> for the whole turn. readOnly refuses edits just
-                  // the same, but keeps the caret. `send` already guards re-entrancy on `busy`.
-                  readOnly={busy}
+                  // Stays editable throughout the turn: you can compose (and queue) the next prompt
+                  // while a reply is still streaming. `send` decides whether to run or queue it.
                 />
-                <button className="sfchat-send" type="submit" disabled={busy || !input.trim()} aria-label="Send">
+                <button className="sfchat-send" type="submit" disabled={!input.trim()} aria-label="Send">
                   <SendIcon />
                 </button>
               </div>
@@ -894,6 +1008,12 @@ function TrashIcon() {
 }
 function RetryIcon() {
   return <RotateCcw size={13} strokeWidth={2} />;
+}
+function QueueRemoveIcon() {
+  return <X size={14} strokeWidth={2} />;
+}
+function JumpIcon() {
+  return <ArrowDown size={16} strokeWidth={2} />;
 }
 function SendIcon() {
   return <ArrowUp size={18} strokeWidth={2.25} />;
@@ -1135,7 +1255,30 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-statustext i:nth-child(4) { animation-delay: .3s; }
 
 /* Floating composer: a larger elevated box on the body — no footer bar. */
-.sfchat-composer-wrap { padding: 14px; flex-shrink: 0; }
+/* Floating composer: overlays the bottom of the message list instead of sitting in its own row, so
+   there's no hard divider clipping the last bubble. Messages scroll up behind it and dissolve into a
+   scrim — the panel bg, fading to transparent at the very top edge. pointer-events are off on the
+   scrim so the messages under it still scroll, and back on for the composer itself (below). The list
+   reserves this bar's height (barH) so the newest message rests just above it. */
+.sfchat-composer-wrap {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  padding: 26px 14px 14px; pointer-events: none;
+  background: linear-gradient(to top, var(--bg) 78%, transparent);
+}
+.sfchat-composer, .sfchat-queue-wrap, .sfchat-spent { pointer-events: auto; }
+
+/* "Jump to latest": appears when the user has scrolled up (auto-scroll disengaged), floating centred
+   just above the composer. Clicking it re-engages the follow-the-bottom behaviour. */
+.sfchat-jump {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+  width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center;
+  background: var(--surface); color: var(--muted);
+  border: 1px solid var(--line); box-shadow: var(--shadow-md);
+  animation: sfchat-enter .2s ease both;
+  transition: color .15s ease, border-color .15s ease;
+}
+.sfchat-jump:hover { color: var(--accent); border-color: var(--accent); }
 .sfchat-composer { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 8px 8px 0; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 .sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
@@ -1195,9 +1338,30 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-send:hover:not(:disabled) { transform: scale(1.05); }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
 
+/* Prompt queue: prompts typed while a reply is still streaming. They sit above the composer and
+   fire automatically, in order, as each reply completes. Accent-tinted so they read as pending
+   (not sent, not an error), each with a remove control. */
+.sfchat-queue-wrap { margin-bottom: 10px; }
+.sfchat-queue-cap { margin: 0 0 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); padding-left: 2px; }
+.sfchat-queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sfchat-queue-item {
+  display: flex; align-items: center; gap: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 10px; padding: 7px 7px 7px 11px;
+  animation: sfchat-tlin .28s cubic-bezier(.22,.61,.36,1) both;
+}
+.sfchat-queue-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfchat-queue-remove {
+  flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px;
+  border: none; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.sfchat-queue-remove:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
 @media (prefers-reduced-motion: reduce) {
   body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm, .sfchat-gauge-fill, .sfchat-gauge-tip,
-  .sfchat-tl, .sfchat-tl-step, .sfchat-tl-step::before,
+  .sfchat-tl, .sfchat-tl-step, .sfchat-tl-step::before, .sfchat-queue-item, .sfchat-jump,
   .sfchat-tl-spin, .sfchat-tl-step.done .sfchat-tl-node { transition: none; animation: none; }
   /* The shimmer paints the label with transparent text; without the animation that would leave it
      invisible, so restore a solid colour when motion is reduced. */

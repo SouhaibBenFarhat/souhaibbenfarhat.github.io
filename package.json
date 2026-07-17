@@ -7,6 +7,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "typecheck": "astro check",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:api": "openapi-typescript https://raw.githubusercontent.com/SouhaibBenFarhat/portfolio-backend/main/openapi.yaml -o src/lib/api-types.ts"
@@ -29,6 +30,7 @@
     "tailwindcss": "^3.4.17"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.9",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "jsdom": "^29.1.1",

@@ -99,7 +99,7 @@ const personSchema = {
     <meta name="theme-color" content="#0d0f12" media="(prefers-color-scheme: dark)" />
 
     {/* Structured data — Person schema. Home only: see `isHome`. */}
-    {isHome && <script type="application/ld+json" set:html={JSON.stringify(personSchema)} />}
+    {isHome && <script is:inline type="application/ld+json" set:html={JSON.stringify(personSchema)} />}
 
     {/* Set theme before paint to avoid a flash */}
     <script is:inline>

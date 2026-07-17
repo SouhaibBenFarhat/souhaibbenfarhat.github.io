@@ -64,7 +64,9 @@ function loadPostHog(): Promise<PostHog> {
 // silently does not record under memory persistence. This daily reset preserves the
 // per-day unique counting on top of persistent storage.
 const DAY_KEY = 'ph_day';
-function resetIfNewDay(posthog: PostHog): void {
+// posthog-js types the `loaded` callback's argument as a leaner interface than the exported
+// `PostHog`, so accept just what this needs (`.reset`) to stay assignable from either.
+function resetIfNewDay(posthog: Pick<PostHog, 'reset'>): void {
   try {
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
     if (localStorage.getItem(DAY_KEY) !== today) {

@@ -1,0 +1,10 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "include": [".astro/types.d.ts", "**/*"],
+  "exclude": ["dist"],
+  "compilerOptions": {
+    "//": "React JSX for the .tsx islands. Astro's own tooling handles .astro templates regardless; this is also what Vitest reads to transform JSX in tests.",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  }
+}

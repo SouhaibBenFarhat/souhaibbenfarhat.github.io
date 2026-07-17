@@ -423,20 +423,23 @@ describe('ChatWidget — composer focus', () => {
     releaseStream();
   });
 
-  it('still refuses input and a second turn while the reply streams', async () => {
+  it('stays editable while the reply streams, queueing the next prompt instead of sending it', async () => {
     holdStream();
     const field = await focusedComposer();
 
-    fireEvent.change(field, { target: { value: 'hi' } });
+    fireEvent.change(field, { target: { value: 'first' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
 
-    // Keeping focus must not mean accepting input: readOnly holds the caret where disabled
-    // dropped it, while still refusing edits.
-    expect(field.readOnly).toBe(true);
+    // The composer no longer locks mid-turn — you can compose the next prompt while the reply streams.
+    expect(field.readOnly).toBe(false);
 
+    fireEvent.change(field, { target: { value: 'second' } });
     fireEvent.keyDown(field, { key: 'Enter' });
+
+    // That second prompt is queued for after the current reply, not sent as a competing turn.
     expect(streamCalls()).toHaveLength(1);
+    expect(screen.getByText('second')).not.toBeNull();
 
     releaseStream();
   });
@@ -680,5 +683,74 @@ describe('ChatWidget — streaming errors', () => {
 
     await waitFor(() => expect(screen.getByText('All good.')).not.toBeNull(), SETTLED);
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+});
+
+describe('ChatWidget — prompt queue', () => {
+  /** Render a fresh chat and wait for the panel to open (role queries can't see inside until then). */
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  /** Hold the stream open after its last frame, so a turn stays "answering" until released. */
+  function holdStream() {
+    streamFrames = [{ conversation_id: CID }, { text: 'Sure.' }];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+  }
+
+  it('queues a prompt typed while the agent is answering, then sends it when the turn ends', async () => {
+    holdStream();
+    await openPanel();
+    sendMessage('first');
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    // Submitted mid-answer → listed under "Up next", not sent as a competing turn.
+    sendMessage('second');
+    expect(streamCalls()).toHaveLength(1);
+    expect(screen.getByText('Up next · sends automatically')).not.toBeNull();
+    expect(screen.getByText('second')).not.toBeNull();
+
+    // Releasing the first reply lets the queued prompt fire on its own, and clears the queue.
+    releaseStream();
+    await waitFor(() => expect(streamCalls()).toHaveLength(2), SETTLED);
+    await waitFor(() => expect(screen.queryByText('Up next · sends automatically')).toBeNull(), SETTLED);
+  });
+
+  it('sends all queued prompts together as one combined follow-up turn', async () => {
+    holdStream();
+    await openPanel();
+    sendMessage('first');
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    sendMessage('second');
+    sendMessage('third');
+    expect(streamCalls()).toHaveLength(1); // both queued behind the live turn
+
+    // When the turn frees, the whole queue goes out as ONE combined turn (like Claude Code) —
+    // a single extra stream, not one per prompt — and both prompts ride in the same message.
+    releaseStream();
+    await waitFor(() => expect(streamCalls()).toHaveLength(2), SETTLED);
+    const bubble = screen.getByText(/second/).closest('.sfchat-bubble');
+    expect(bubble?.textContent).toContain('second');
+    expect(bubble?.textContent).toContain('third');
+  });
+
+  it('lets you remove a queued prompt before it sends', async () => {
+    holdStream();
+    await openPanel();
+    sendMessage('first');
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    sendMessage('regret this');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove queued prompt: regret this' }));
+    expect(screen.queryByText('regret this')).toBeNull();
+
+    // With the queue empty again, finishing the reply opens no further stream.
+    releaseStream();
+    await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
+    expect(streamCalls()).toHaveLength(1);
   });
 });
