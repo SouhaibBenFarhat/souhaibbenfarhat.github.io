@@ -754,3 +754,61 @@ describe('ChatWidget — prompt queue', () => {
     expect(streamCalls()).toHaveLength(1);
   });
 });
+
+describe('ChatWidget — answering model', () => {
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  it('labels the answering model from the model frame', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { model: 'mistral/mistral-small-latest' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
+    expect(screen.getByText('Mistral Small')).not.toBeNull();
+  });
+
+  it('falls back to the provider name for an unmapped model of a known provider', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { model: 'gemini/gemini-9.9-turbo' }, // not in the map, but recognisably Gemini
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
+    expect(screen.getByText('Gemini')).not.toBeNull();
+  });
+
+  it('falls back to a generic label for an unrecognised model', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { model: 'acme/mystery-model-9000' },
+      { text: 'Answer.' },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
+    expect(screen.getByText('AI model')).not.toBeNull();
+  });
+
+  it('shows no model caption when the turn reports no model', async () => {
+    streamFrames = [{ conversation_id: CID }, { text: 'Answer.' }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
+    expect(screen.queryByText('AI model')).toBeNull();
+  });
+});
