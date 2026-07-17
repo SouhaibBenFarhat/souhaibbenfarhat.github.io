@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -225,6 +225,8 @@ function ChatPanel() {
   // Measured height of the floating composer bar. The list reserves this much space at its bottom so
   // the newest message rests just above the composer rather than hiding behind it.
   const [barH, setBarH] = useState(0);
+  // "Jump to latest" button — shown once the user scrolls up off the bottom (auto-scroll disengaged).
+  const [showJump, setShowJump] = useState(false);
   const conversationId = useRef<string | null>(storedId);
   const seeded = useRef(false);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -232,6 +234,7 @@ function ChatPanel() {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const revealRaf = useRef<number | null>(null);
   const barRO = useRef<ResizeObserver | null>(null);
+  const stuckRef = useRef(true); // is auto-scroll following the bottom? false once the user scrolls up
   const welcomeDone = welcome.length >= WELCOME.length;
 
   const restore = useConversation(storedId);
@@ -347,6 +350,7 @@ function ChatPanel() {
   }, [welcomeArmed, welcomeRun]);
 
   useEffect(() => {
+    if (!stuckRef.current) return; // the user scrolled up — don't drag them back to the bottom
     // While streaming, the text grows a few chars per frame — an instant scroll pins
     // to the bottom and reads as one continuous glide. Smooth-scrolling here would
     // restart its animation every frame and stutter. Use smooth only for one-off jumps.
@@ -355,6 +359,27 @@ function ChatPanel() {
       behavior: busy ? 'auto' : 'smooth',
     });
   }, [messages, status, welcome, open, busy]);
+
+  // Auto-scroll follows the newest content only while the user is at the bottom. Scrolling up — to
+  // re-read something while the agent streams, say — disengages it, so tokens stop yanking the view
+  // down; scrolling back to the bottom re-engages it. `stuckRef` is a ref so it costs no re-render per
+  // frame; `showJump` only flips React state when the boundary is actually crossed.
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    stuckRef.current = atBottom;
+    setShowJump(!atBottom);
+  };
+
+  /** Re-engage auto-scroll and glide to the newest message. */
+  const jumpToLatest = () => {
+    const el = listRef.current;
+    if (!el) return;
+    stuckRef.current = true;
+    setShowJump(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   // Dismiss the confirm popover on Escape or a click outside it.
   useEffect(() => {
@@ -630,6 +655,8 @@ function ChatPanel() {
     if (!text || usage?.exhausted) return;
     setInput('');
     fieldRef.current?.focus();
+    stuckRef.current = true; // submitting re-engages auto-scroll, so the reply is followed
+    setShowJump(false);
     if (busy) setQueue((q) => [...q, text]);
     else streamTurn(text);
   };
@@ -640,6 +667,8 @@ function ChatPanel() {
     const userMsg = messages[assistantIndex - 1];
     if (!userMsg || userMsg.role !== 'user') return;
     setMessages((m) => m.slice(0, assistantIndex - 1));
+    stuckRef.current = true;
+    setShowJump(false);
     streamTurn(userMsg.content);
   };
 
@@ -759,6 +788,7 @@ function ChatPanel() {
         <div
           className="sfchat-list"
           ref={listRef}
+          onScroll={onListScroll}
           // Reserve room for the floating composer so the last message clears it, not hides behind it.
           style={barH ? { paddingBottom: barH + 8 } : undefined}
         >
@@ -845,6 +875,18 @@ function ChatPanel() {
             </div>
           )}
         </div>
+
+        {showJump && (
+          <button
+            type="button"
+            className="sfchat-jump"
+            style={{ bottom: (barH || 64) + 8 }}
+            onClick={jumpToLatest}
+            aria-label="Scroll to latest"
+          >
+            <JumpIcon />
+          </button>
+        )}
 
         {exhausted ? (
           // Nothing more can be sent to a spent thread, so a composer would only be a dead
@@ -969,6 +1011,9 @@ function RetryIcon() {
 }
 function QueueRemoveIcon() {
   return <X size={14} strokeWidth={2} />;
+}
+function JumpIcon() {
+  return <ArrowDown size={16} strokeWidth={2} />;
 }
 function SendIcon() {
   return <ArrowUp size={18} strokeWidth={2.25} />;
@@ -1221,6 +1266,19 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
   background: linear-gradient(to top, var(--bg) 78%, transparent);
 }
 .sfchat-composer, .sfchat-queue-wrap, .sfchat-spent { pointer-events: auto; }
+
+/* "Jump to latest": appears when the user has scrolled up (auto-scroll disengaged), floating centred
+   just above the composer. Clicking it re-engages the follow-the-bottom behaviour. */
+.sfchat-jump {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+  width: 32px; height: 32px; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center;
+  background: var(--surface); color: var(--muted);
+  border: 1px solid var(--line); box-shadow: var(--shadow-md);
+  animation: sfchat-enter .2s ease both;
+  transition: color .15s ease, border-color .15s ease;
+}
+.sfchat-jump:hover { color: var(--accent); border-color: var(--accent); }
 .sfchat-composer { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 8px 8px 0; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 .sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
@@ -1303,7 +1361,7 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   body, .sfchat-panel, .sfchat-fab, .sfchat-enter, .sfchat-chip, .sfchat-confirm, .sfchat-gauge-fill, .sfchat-gauge-tip,
-  .sfchat-tl, .sfchat-tl-step, .sfchat-tl-step::before, .sfchat-queue-item,
+  .sfchat-tl, .sfchat-tl-step, .sfchat-tl-step::before, .sfchat-queue-item, .sfchat-jump,
   .sfchat-tl-spin, .sfchat-tl-step.done .sfchat-tl-node { transition: none; animation: none; }
   /* The shimmer paints the label with transparent text; without the animation that would leave it
      invisible, so restore a solid colour when motion is reduced. */
