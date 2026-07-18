@@ -26,15 +26,24 @@ const SPENT = { context_tokens: 20000, context_limit: 20000, exhausted: true };
 let streamGate: Promise<void> | null = null;
 let releaseStream: () => void = () => {};
 
-/** A stubbed SSE body: one `data:` frame per read, then done. */
-function sseBody(frames: unknown[]) {
+/** A stubbed SSE body: one `data:` frame per read, then done. Respects the fetch `signal`, so an
+ *  abort (the Stop button) rejects a pending read the way a real streamed response would. */
+function sseBody(frames: unknown[], signal?: AbortSignal | null) {
   const encoder = new TextEncoder();
   let i = 0;
+  const aborted = () =>
+    new Promise<never>((_, reject) => {
+      const fail = () => reject(new DOMException('Aborted', 'AbortError'));
+      if (signal?.aborted) fail();
+      else signal?.addEventListener('abort', fail, { once: true });
+    });
   return {
     getReader: () => ({
       read: async () => {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         if (i >= frames.length) {
-          if (streamGate) await streamGate;
+          // Hold before `done` when gated — but a stop wins the race, so it's observable mid-stream.
+          if (streamGate) await Promise.race([streamGate, aborted()]);
           return { value: undefined, done: true };
         }
         return { value: encoder.encode(`data: ${JSON.stringify(frames[i++])}\n\n`), done: false };
@@ -93,7 +102,7 @@ beforeEach(() => {
       if (String(url).endsWith('/chat/stream')) {
         // A refused thread answers with JSON and no body to read — not a stream.
         if (streamStatus === 403) return { ok: false, status: 403, json: async () => forbiddenBody };
-        return { ok: true, status: 200, body: sseBody(streamFrames) };
+        return { ok: true, status: 200, body: sseBody(streamFrames, init?.signal) };
       }
       // Rate a message: echoes back the value it was sent, like the real endpoint.
       if (String(url).includes('/rating/')) {
@@ -1061,6 +1070,87 @@ describe('ChatWidget — public visitor', () => {
     await waitFor(() => expect(screen.getByText('⚠️ The assistant hit a snag.')).not.toBeNull(), SETTLED);
     // The raw provider exception is owner-only — a regular visitor must never see it.
     expect(screen.queryByText('ProviderError: upstream 500')).toBeNull();
+  });
+});
+
+describe('ChatWidget — stopping a reply', () => {
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  /** Hold the stream open after the given frames, so the turn stays "streaming" until released. */
+  function holdAfter(frames: unknown[]) {
+    streamFrames = frames;
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+  }
+
+  it('shows a Stop control only while a reply is streaming', async () => {
+    holdAfter([{ conversation_id: CID }, { text: 'Working.' }]);
+    await openPanel();
+    // Nothing streaming yet.
+    expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull();
+
+    sendMessage('hi');
+    await screen.findByRole('button', { name: 'Stop generating' }, SETTLED);
+
+    releaseStream();
+    // Turn done → Stop gone.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull(), SETTLED);
+  });
+
+  it('stops the stream, keeps the partial reply, and shows no error or retry', async () => {
+    holdAfter([{ conversation_id: CID }, { text: 'Half an answer' }]);
+    await openPanel();
+    sendMessage('hi');
+    await waitFor(() => expect(screen.getByText('Half an answer')).not.toBeNull(), SETTLED);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull(), SETTLED);
+    // The partial answer is kept — a stop isn't a failure.
+    expect(screen.getByText('Half an answer')).not.toBeNull();
+    expect(screen.queryByText(/⚠️/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    releaseStream(); // releasing the gate now must not resurrect the turn
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull(), SETTLED);
+  });
+
+  it('leaves the composer ready, so the next turn sends normally after a stop', async () => {
+    holdAfter([{ conversation_id: CID }, { text: 'Partial' }]);
+    await openPanel();
+    sendMessage('hi');
+    await waitFor(() => expect(screen.getByText('Partial')).not.toBeNull(), SETTLED);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull(), SETTLED);
+
+    streamFrames = [{ conversation_id: CID }, { text: 'A fresh answer.' }, { done: true }];
+    streamGate = null;
+    sendMessage('again');
+
+    await waitFor(() => expect(screen.getByText('A fresh answer.')).not.toBeNull(), SETTLED);
+    expect(streamCalls()).toHaveLength(2);
+  });
+
+  it('clears queued prompts when the turn is stopped — stop means stop', async () => {
+    holdAfter([{ conversation_id: CID }, { text: 'First' }]);
+    await openPanel();
+    sendMessage('hi');
+    await waitFor(() => expect(streamCalls()).toHaveLength(1), SETTLED);
+
+    // Queue a follow-up while the reply streams.
+    sendMessage('queued follow-up');
+    expect(screen.getByText('Up next · sends automatically')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop generating' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull(), SETTLED);
+
+    // The queued prompt did not auto-fire, and the queue is gone.
+    expect(streamCalls()).toHaveLength(1);
+    expect(screen.queryByText('Up next · sends automatically')).toBeNull();
+    releaseStream();
   });
 });
 
