@@ -1064,7 +1064,7 @@ function ChatPanel() {
                 <div key={i} className="sfchat-row assistant sfchat-enter">
                   <span className="sfchat-avatar sm"><AgentIcon /></span>
                   <div className="sfchat-assistant-col">
-                    {tools.length > 0 && <ToolActivity steps={tools} />}
+                    {tools.length > 0 && <ToolActivity steps={tools} thinking={turnActive} />}
                     {(showTyping || m.content) && (
                       <div className={`sfchat-bubble assistant ${showTyping ? 'sfchat-typing' : ''}`}>
                         {showTyping ? (
@@ -1250,9 +1250,20 @@ function ChatPanel() {
 // It stays fully open — including after the reply finishes — so a completed answer keeps the whole
 // record of the tools it ran. Steps live on the message, so they persist for the session (but not
 // across a reload — the backend doesn't store them).
-function ToolActivity({ steps }: { steps: ToolStep[] }) {
+//
+// While the turn is still live (`thinking`), a persistent "Thinking…" spinner leads the timeline —
+// so once every tool is checked but the model is still working (deciding, or streaming its reply),
+// the tree keeps a live signal instead of reading as an all-done, stuck list. It clears the moment
+// the turn finishes, leaving the clean record of checks.
+function ToolActivity({ steps, thinking }: { steps: ToolStep[]; thinking: boolean }) {
   return (
     <ol className="sfchat-tl" aria-live="polite">
+      {thinking && (
+        <li className="sfchat-tl-step active">
+          <span className="sfchat-tl-node"><span className="sfchat-tl-spin" /></span>
+          <span className="sfchat-tl-label">Thinking…</span>
+        </li>
+      )}
       {steps.map((s, i) => (
         <li key={i} className={`sfchat-tl-step ${s.done ? 'done' : 'active'}`}>
           <span className="sfchat-tl-node">
