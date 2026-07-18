@@ -60,6 +60,20 @@ a { color: inherit; text-decoration: none; }
 #site-header { transition: box-shadow .3s ease, background-color .3s ease; }
 #site-header.scrolled { box-shadow: var(--shadow-sm); }
 
+/* The hairline header divider (border-line at 70%) all but vanishes in dark mode; lift it
+   toward the text colour so the sticky nav stays visibly separated from the page below. */
+.dark #site-header { border-bottom-color: color-mix(in srgb, var(--line), var(--text) 22%); }
+
+/* AI assistant panel: reserve a fixed right-side gutter (owner/internal only) so the docked
+   panel never reflows or shifts the page. `sfchat-pushed` is added before hydration (see
+   Base.astro) and kept for the whole session, so opening/closing animates only the panel —
+   never the page. These rules live here (not in the island) so the gutter exists from first
+   paint; there is deliberately no margin transition, which is what used to slide the page. */
+@media (min-width: 880px) {
+  body.sfchat-pushed { margin-right: calc(var(--sfchat-w, 460px) + 32px); }
+}
+body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
+
 /* Thin, quiet scrollbar */
 * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 
