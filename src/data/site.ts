@@ -4,7 +4,7 @@
 
 export const profile = {
   name: 'Souhaib Ben Farhat',
-  title: 'Senior Fullstack Engineer — AI Focus',
+  title: 'AI Focus — Senior Fullstack Engineer',
   tagline: 'I turn AI capabilities into real products — owned end to end, from agent tooling and APIs up to a refined UI.',
   // Title for search snippets & social cards. Role first, so the positioning leads rather
   // than the name. Separate from `title`, which is the display role the hero, footer, and
@@ -159,6 +159,8 @@ export const projects: Project[] = [
 
 export type Role = {
   company: string;
+  /** Employer's website. Omitted for composite/earlier entries that aren't a single company. */
+  url?: string;
   role: string;
   period: string;
   location: string;
@@ -170,6 +172,7 @@ export type Role = {
 export const experience: Role[] = [
   {
     company: 'parcelLab',
+    url: 'https://parcellab.com',
     role: 'Software Engineer · Fullstack & AI',
     period: 'Feb 2025 — Present',
     location: 'München',
@@ -189,6 +192,7 @@ export const experience: Role[] = [
   },
   {
     company: 'KONUX',
+    url: 'https://konux.com',
     role: 'Software Engineer · Frontend & Platform',
     period: 'Jul 2021 — Jan 2025',
     location: 'München',
@@ -205,6 +209,7 @@ export const experience: Role[] = [
   },
   {
     company: 'Klarx',
+    url: 'https://klarx.de',
     role: 'Fullstack Developer (React / Ruby on Rails)',
     period: 'Jan 2019 — Jun 2021',
     location: 'München',
@@ -304,8 +309,8 @@ export const languages = [
 // Single-page scroll: nav items are in-page section anchors (scroll-spy highlights the active one).
 export const nav = [
   { href: '#about', label: 'About' },
-  { href: '#work', label: 'Work' },
   { href: '#experience', label: 'Experience' },
+  { href: '#work', label: 'Work' },
   { href: '#skills', label: 'Skills' },
   { href: '#contact', label: 'Contact' },
 ];

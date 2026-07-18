@@ -1,0 +1,26 @@
+---
+// "How I work" — operating principles. Sits between Experience and Work so it reads as
+// the lens for the case studies that follow. Kept out of the nav (a narrative beat, not a
+// destination). Content is inline, mirroring how it previously lived in About.astro.
+const principles = [
+  { t: 'Build first, then align', d: 'I prototype to make the case, then bring people in — momentum starts with a working thing to react to, not a slide.' },
+  { t: 'Make it hold', d: 'I care about durable work — genuine quality I am proud of, built to last and easy to extend, not just shipped and forgotten.' },
+  { t: 'Taste is a skill', d: 'A strong sense of what good UI and good product feel like — judgment for what is worth building, and what is not, beyond what was asked.' },
+  { t: 'Think in systems', d: 'Architecture and trade-offs up front; finding the signal in unclear requirements and shipping the thing that actually matters.' },
+  { t: 'Own it end to end', d: 'I follow under-defined work across the stack — UI, API, infrastructure — because that is what keeps it, and the team, unblocked.' },
+  { t: 'Amplify', d: 'Make what our stack and AI can do visible, lift the people around me, and leave reviews, tooling, and patterns others can build on.' },
+];
+---
+<section class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <p class="label reveal">How I work</p>
+    <div class="mt-8 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
+      {principles.map((p, i) => (
+        <div class="reveal bg-surface p-7" style={`transition-delay:${i * 70}ms`}>
+          <p class="font-display text-lg">{p.t}</p>
+          <p class="mt-2 text-[0.95rem] leading-relaxed text-muted">{p.d}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
