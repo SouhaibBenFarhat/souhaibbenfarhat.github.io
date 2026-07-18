@@ -48,6 +48,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/conversations/{conversation_id}/messages/{message_id}/rating/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rate a message
+         * @description Set thumbs up (+1), down (-1), or clear (0) on one message of a conversation. Idempotent — replaces any previous rating.
+         */
+        put: operations["chat_conversations_messages_rating_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -101,7 +121,7 @@ export interface paths {
          * Stream an assistant reply (Server-Sent Events)
          * @description Runs the LangGraph agent and streams its reply as `text/event-stream`.
          *
-         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then a `ChatModelFrame` naming the answering model, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, a `ChatSuggestionsFrame` with follow-up chips, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
+         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then a `ChatModelFrame` naming the answering model, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatMessageIdFrame` naming the persisted reply, a `ChatUsageFrame`, a `ChatSuggestionsFrame` with follow-up chips, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
          */
         post: operations["chat_stream_create"];
         delete?: never;
@@ -140,6 +160,8 @@ export interface components {
             status: string;
         };
         Message: {
+            /** @description Message id — the target of the rating endpoint. */
+            id: number;
             /**
              * @description "user" or "assistant".
              *
@@ -148,6 +170,20 @@ export interface components {
              */
             role: components["schemas"]["RoleEnum"];
             content: string;
+            /** @description Stored feedback: +1 up, -1 down, null if unrated. */
+            rating: number | null;
+        };
+        /** @description A message's rating after it's set — what the rating endpoint returns. */
+        MessageRating: {
+            /** @description The rated message's id. */
+            id: number;
+            /** @description The stored value: +1, -1, or null once cleared. */
+            rating: number | null;
+        };
+        /** @description The body of a rating request: the new thumbs value for one message. */
+        MessageRatingRequest: {
+            /** @description +1 thumbs up, -1 thumbs down, 0 to clear a previous rating. */
+            rating: number;
         };
         /**
          * @description * `user` - User
@@ -198,6 +234,10 @@ export interface components {
             /** @enum {string} */
             status: "start" | "end";
         };
+        /** @description The id of the persisted assistant reply, so the client can rate it (thumbs up/down via the rating endpoint) without waiting for a reload. Sent once, after the answer; absent when the turn broke and nothing was persisted. */
+        ChatMessageIdFrame: {
+            message_id: number;
+        };
         /** @description How full the thread's context is, for the client's gauge. Sent once, once the answer is complete, and omitted when the provider reported no usage. */
         ChatUsageFrame: {
             usage: components["schemas"]["ChatUsage"];
@@ -220,7 +260,7 @@ export interface components {
             done: true;
         };
         /** @description One Server-Sent Events frame. Each `data:` line is one of these. */
-        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatModelFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatSuggestionsFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
+        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatModelFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatMessageIdFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatSuggestionsFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
     };
     responses: never;
     parameters: never;
@@ -296,6 +336,41 @@ export interface operations {
                 content?: never;
             };
             /** @description Unknown conversation. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    chat_conversations_messages_rating_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                message_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageRatingRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["MessageRatingRequest"];
+                "multipart/form-data": components["schemas"]["MessageRatingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageRating"];
+                };
+            };
+            /** @description Unknown conversation, or message not in it. */
             404: {
                 headers: {
                     [name: string]: unknown;
