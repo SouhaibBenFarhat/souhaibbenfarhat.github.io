@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import ChatWidget from './ChatWidget';
+import ChatWidget, { completeMarkdown } from './ChatWidget';
 
 // The widget renders nothing unless the browser is in internal/owner mode.
 vi.mock('../../lib/internal', () => ({ isInternal: () => true }));
@@ -817,3 +817,52 @@ describe('ChatWidget — collapse and reopen', () => {
     expect(css).toMatch(/\.sfchat-open\s+\.sfchat-composer[^{]*\{[^}]*pointer-events:\s*auto/);
   });
 });
+
+// completeMarkdown HOLDS an unclosed trailing token — truncating at its opening marker so the parser
+// never sees a half-open construct (which would render raw, then collapse when it closes = the flip).
+// The held text reappears the instant the token closes. Appending a closer can't work: CommonMark
+// won't close a delimiter that hugs whitespace ("**word "). A whole-file prefix simulation guards
+// that this yields zero non-monotonic renders (see the _flip diagnostic used during development).
+// completeMarkdown closes an open inline construct so it renders formatted LIVE (bold from its first
+// character), with the closer placed before any trailing whitespace (CommonMark won't close a
+// delimiter that hugs a space) and an empty just-opened marker dropped. This keeps the width stable
+// (no plain→bold jump that re-wraps the line) and never hands the parser a half-open token that could
+// flip. A full-file prefix simulation during development confirmed zero non-monotonic renders.
+describe('streaming markdown — completeMarkdown closes open tokens live (no flip, no reflow)', () => {
+  it('closes an open bold so it renders bold immediately, growing as it streams', () => {
+    expect(completeMarkdown('this is **impor')).toBe('this is **impor**');
+    expect(completeMarkdown('this is **important**')).toBe('this is **important**');
+  });
+
+  it('places the closer before trailing whitespace, and drops an empty just-opened marker', () => {
+    expect(completeMarkdown('this is **senior ')).toBe('this is **senior** '); // not "**senior **"
+    expect(completeMarkdown('this is **')).toBe('this is '); // empty open → dropped, no "****"
+  });
+
+  it('closes unclosed inline code, and closes an unterminated code fence', () => {
+    expect(completeMarkdown('run `npm i')).toBe('run `npm i`');
+    expect(completeMarkdown('```js\nconst a = 1')).toBe('```js\nconst a = 1\n```');
+  });
+
+  it('closes an unclosed lone-star italic', () => {
+    expect(completeMarkdown('a *wor')).toBe('a *wor*');
+    expect(completeMarkdown('a *word*')).toBe('a *word*');
+  });
+
+  it('holds a half-formed trailing link in every shape, incl. [text] before the url', () => {
+    expect(completeMarkdown('see my [C')).toBe('see my '); //             [partial-text
+    expect(completeMarkdown('see my [CV]')).toBe('see my '); //           [text]  ← the flip case
+    expect(completeMarkdown('see my [CV](https://exa')).toBe('see my '); // [text](partial-url
+  });
+
+  it('leaves a complete trailing code fence intact (never truncates its closing ```)', () => {
+    const withFence = 'note\n\n```\nboom\n```';
+    expect(completeMarkdown(withFence)).toBe(withFence);
+  });
+
+  it('leaves already-complete markdown untouched', () => {
+    const done = 'done **bold** and `code` and [x](https://y)';
+    expect(completeMarkdown(done)).toBe(done);
+  });
+});
+
