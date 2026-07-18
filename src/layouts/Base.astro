@@ -122,6 +122,20 @@ const personSchema = {
     {/* AI chat assistant — a React island; hydrates when the browser is idle */}
     <ChatWidget client:idle />
 
+    {/* Reserve the assistant's side gutter before its island hydrates, so an owner (internal)
+        visit lays out with room for the docked panel from first paint — the page never shifts
+        when the panel auto-opens. Non-internal visitors never mount the panel, so never see it. */}
+    <script is:inline>
+      (() => {
+        try {
+          const param = new URLSearchParams(location.search).get('internal');
+          if (localStorage.getItem('internal') === '1' || param === '1') {
+            document.body.classList.add('sfchat-pushed');
+          }
+        } catch { /* storage blocked — skip the reservation */ }
+      })();
+    </script>
+
     {/* Cookie consent — client-only React island; only shown when analytics is live */}
     <CookieBanner client:only="react" />
 
