@@ -12,3 +12,6 @@ node_modules/
 .DS_Store
 *.log
 .vscode/
+
+# local-only dev tooling (not part of the shipped site)
+scripts/mock-chat-backend.mjs
