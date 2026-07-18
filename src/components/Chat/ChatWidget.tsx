@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Cpu, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { API } from '../../lib/api';
 import { isInternal } from '../../lib/internal';
@@ -66,23 +68,59 @@ const REVEAL_MAX_CPS = 200; // ceiling so a big buffered response reveals smooth
 // moment the number matters is the one before the chat stops.
 const WARM_AT_PCT = 80;
 
-// Render a safe subset of markdown: escape first, then add our own tags only.
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Streaming-tolerant markdown. While a reply is still arriving its markdown is half-formed — an open
+// `**`, a `[label](http…` without its `)`, an unterminated ``` fence. Handing that to the parser
+// renders the raw delimiters, which then collapse when the closer lands (the "text flips back"
+// effect). Close the open constructs, and hold an incomplete trailing link, so a token formats once —
+// when whole — and never un-formats. Applied only while streaming; a finished message is balanced.
+export function completeMarkdown(src: string): string {
+  let s = src;
+  // Hold an incomplete trailing link in EVERY half-typed shape — "[", "[text", "[text]", "[text](",
+  // "[text](url" — since each renders raw and then collapses to the label. Only a closed [text](url)
+  // is kept. Most-complete first, so the right amount is trimmed.
+  s = s.replace(/\[[^\]]*\]\([^)\s]*$/, ''); // [text](partial-url
+  s = s.replace(/\[[^\]]*\]$/, ''); //          [text]  (bracket closed, url not started)
+  s = s.replace(/\[[^\]]*$/, ''); //            [partial-text  (bracket still open)
+  if ((s.match(/```/g) || []).length % 2 === 1) return s + '\n```'; // fence: render code as it grows
+  // Close an open inline construct so its text renders formatted LIVE (bold from its first character,
+  // like ChatGPT) — no plain→bold width jump that would re-wrap the line when the marker lands. The
+  // closer goes right after the last non-space char (never appended after trailing space, which
+  // CommonMark refuses to close), and an empty just-opened marker is dropped. Inner-most first.
+  const close = (marker: string, at: number) => {
+    if (at < 0) return;
+    const after = s.slice(at + marker.length);
+    const body = after.replace(/\s+$/, ''); // text inside the marker, without trailing whitespace
+    s = body === '' ? s.slice(0, at) : s.slice(0, at) + marker + body + marker + after.slice(body.length);
+  };
+  if ((s.match(/`/g) || []).length % 2 === 1) close('`', s.lastIndexOf('`'));
+  if ((s.match(/\*\*/g) || []).length % 2 === 1) close('**', s.lastIndexOf('**'));
+  if ((s.replace(/\*\*/g, '').match(/\*/g) || []).length % 2 === 1) {
+    for (let i = s.length - 1; i >= 0; i--) {
+      if (s[i] === '*' && s[i - 1] !== '*' && s[i + 1] !== '*') { close('*', i); break; }
+    }
+  }
+  return s;
 }
-function renderMarkdown(src: string): string {
-  let s = escapeHtml(src);
-  s = s.replace(/```([\s\S]*?)```/g, (_m, c) => `<pre><code>${c.trim()}</code></pre>`);
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-  s = s.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+
+// Render a message with a real markdown parser (react-markdown + GFM) rather than hand-rolled regex —
+// it handles nesting, lists, and every delimiter interaction correctly, which regex fundamentally
+// can't. Memoized on `text`: a finished message's tree freezes while later messages stream (no
+// re-parse-the-world flicker, and text selection survives), and for the streaming message react
+// reconciles the element tree instead of replacing innerHTML wholesale.
+const MessageMarkdown = memo(function MessageMarkdown({ text }: { text: string }) {
+  return (
+    <div className="sfchat-md">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
   );
-  s = s.replace(/^[-*] (.+)$/gm, '<span class="sfchat-li">$1</span>');
-  return s.replace(/\n/g, '<br>');
-}
+});
 
 // Inline error text for the assistant bubble: the friendly message on its own line, and — for a
 // backend error frame — the raw technical `detail` in a code block below it, so a multi-line
@@ -527,12 +565,27 @@ function ChatPanel() {
       if (pending.length) {
         const cps = Math.min(REVEAL_MAX_CPS, REVEAL_CPS + pending.length * REVEAL_CATCHUP);
         carry += cps * dt;
-        const n = Math.floor(carry);
-        if (n > 0) {
-          carry -= n;
-          const chunk = pending.slice(0, n);
-          pending = pending.slice(n);
-          setLastAssistant((prev) => prev + chunk);
+        const budget = Math.floor(carry);
+        if (budget > 0) {
+          // Reveal whole words, not characters: partial words rewrap as they grow, which is what makes
+          // the stream jitter and hop lines. Cut at the last whitespace within the budget so only
+          // complete words land; hold a partial trailing word until its boundary (or the stream ends).
+          let cut = Math.min(budget, pending.length);
+          if (cut < pending.length) {
+            let ws = -1;
+            for (let k = cut - 1; k >= 0; k--) {
+              if (/\s/.test(pending[k])) { ws = k; break; }
+            }
+            // Reveal up to the last whole word. No word boundary within budget → wait for more, or,
+            // if the stream has ended, flush the final word whole (so it never lands half-typed).
+            cut = ws >= 0 ? ws + 1 : netDone ? pending.length : 0;
+          }
+          if (cut > 0) {
+            carry -= cut;
+            const chunk = pending.slice(0, cut);
+            pending = pending.slice(cut);
+            setLastAssistant((prev) => prev + chunk);
+          }
         }
       }
       if (pending.length) {
@@ -825,7 +878,7 @@ function ChatPanel() {
               <div className={`sfchat-bubble assistant ${welcome ? '' : 'sfchat-typing'}`}>
                 {welcome ? (
                   <>
-                    <span dangerouslySetInnerHTML={{ __html: renderMarkdown(welcome) }} />
+                    {welcome}
                     {!welcomeDone && <span className="sfchat-caret" />}
                   </>
                 ) : (
@@ -873,7 +926,7 @@ function ChatPanel() {
                         {showTyping ? (
                           <TypingDots />
                         ) : (
-                          <span dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+                          <MessageMarkdown text={turnActive ? completeMarkdown(m.content) : m.content} />
                         )}
                       </div>
                     )}
@@ -1176,8 +1229,20 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-bubble code { background: color-mix(in srgb, var(--text) 8%, transparent); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; }
 .sfchat-bubble pre { background: color-mix(in srgb, var(--text) 7%, transparent); padding: 10px; border-radius: 9px; overflow-x: auto; margin: 6px 0; }
 .sfchat-bubble pre code { background: none; padding: 0; }
-.sfchat-li { display: block; padding-left: 14px; position: relative; }
-.sfchat-li::before { content: '•'; position: absolute; left: 2px; color: var(--accent); }
+
+/* react-markdown output. The bubble keeps white-space:pre-wrap for plain user text, so reset it here
+   — the parser already resolved whitespace — and tame the semantic elements (p/ul/ol/li/blockquote)
+   to the bubble's tight rhythm. First/last margins collapse so a single paragraph sits flush. */
+.sfchat-md { white-space: normal; }
+.sfchat-md > :first-child { margin-top: 0; }
+.sfchat-md > :last-child { margin-bottom: 0; }
+.sfchat-md p { margin: 0; }
+.sfchat-md > * + * { margin-top: .5em; }
+.sfchat-md ul, .sfchat-md ol { margin: .2em 0; padding-left: 1.35em; }
+.sfchat-md li { margin: .1em 0; }
+.sfchat-md li::marker { color: var(--accent); }
+.sfchat-md blockquote { margin: .3em 0; padding-left: .8em; border-left: 2px solid var(--line); color: var(--muted); }
+.sfchat-md h1, .sfchat-md h2, .sfchat-md h3, .sfchat-md h4 { margin: .3em 0; font-size: 1em; font-weight: 600; }
 
 /* Assistant column: the tool-activity panel stacked above the reply bubble, sharing the avatar row. */
 .sfchat-assistant-col { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; min-width: 0; max-width: 100%; }
