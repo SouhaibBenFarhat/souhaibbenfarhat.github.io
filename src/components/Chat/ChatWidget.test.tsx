@@ -794,23 +794,31 @@ describe('ChatWidget — answering model', () => {
     await waitFor(() => expect(screen.getByText('Answer.')).not.toBeNull(), SETTLED);
   }
 
-  it('labels a known model with its friendly name', async () => {
+  /** The header status line — "online", plus the answering model once a turn has replied. */
+  const headerStatus = () => document.querySelector('.sfchat-online-label')?.textContent?.trim() ?? '';
+
+  it('names a known model by its friendly name in the header', async () => {
     await answerWithModel('mistral/open-mistral-nemo');
-    expect(screen.getByText('Mistral Nemo')).not.toBeNull();
+    expect(headerStatus()).toBe('online · Mistral Nemo');
   });
 
   it('maps the other available models too', async () => {
     await answerWithModel('zai/glm-4.7-flash');
-    expect(screen.getByText('GLM 4.7 Flash')).not.toBeNull();
+    expect(headerStatus()).toBe('online · GLM 4.7 Flash');
   });
 
   it('shows the raw id verbatim for an unmapped model — no static fallback', async () => {
     await answerWithModel('acme/mystery-model-9000');
-    expect(screen.getByText('acme/mystery-model-9000')).not.toBeNull();
+    expect(headerStatus()).toBe('online · acme/mystery-model-9000');
   });
 
-  it('shows no model caption when the turn reports no model', async () => {
+  it('shows just "online" when the turn reports no model', async () => {
     await answerWithModel(null);
+    expect(headerStatus()).toBe('online');
+  });
+
+  it('no longer shows a per-message model caption under the bubble', async () => {
+    await answerWithModel('mistral/open-mistral-nemo');
     expect(document.querySelector('.sfchat-model')).toBeNull();
   });
 });
@@ -978,8 +986,7 @@ describe('ChatWidget — follow-up suggestions', () => {
     await openPanel();
     sendMessage('hi');
 
-    await waitFor(() => expect(screen.getByText('Ask a follow-up')).not.toBeNull(), SETTLED);
-    expect(screen.getByRole('button', { name: 'What has he built recently?' })).not.toBeNull();
+    await screen.findByRole('button', { name: 'What has he built recently?' }, SETTLED);
     expect(screen.getByRole('button', { name: 'Where is he based?' })).not.toBeNull();
   });
 
@@ -1027,7 +1034,8 @@ describe('ChatWidget — follow-up suggestions', () => {
     sendMessage('hi');
 
     await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
-    expect(screen.queryByText('Ask a follow-up')).toBeNull();
+    // No suggestion frame → no chip row at all.
+    expect(document.querySelector('.sfchat-followups')).toBeNull();
   });
 });
 
