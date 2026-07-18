@@ -634,6 +634,30 @@ describe('ChatWidget — tool timeline', () => {
 
     releaseStream();
   });
+
+  it('keeps a "Thinking…" spinner atop the timeline while the turn is live after tools finish', async () => {
+    // Every tool finishes (all checks), but the stream is held open — the model is still working.
+    streamFrames = [
+      { conversation_id: CID },
+      { tool: 'get_facts', label: 'loading facts', status: 'start' },
+      { tool: 'get_facts', label: 'loading facts', status: 'end' },
+    ];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    await openPanel();
+    sendMessage('hi');
+
+    // The tool is checked (done) yet the turn is still active → "Thinking…" leads the tree so it
+    // doesn't read as a stuck, all-done list.
+    await waitFor(() => expect(stepClass('loading facts')).toContain('done'), SETTLED);
+    expect(screen.getByText('Thinking…')).not.toBeNull();
+
+    // Once the turn ends, the live signal clears — leaving the clean checked record.
+    releaseStream();
+    await waitFor(() => expect(screen.queryByText('Thinking…')).toBeNull(), SETTLED);
+    expect(screen.getByText('loading facts')).not.toBeNull();
+  });
 });
 
 describe('ChatWidget — streaming errors', () => {
