@@ -300,6 +300,11 @@ function ChatPanel() {
   const listRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const revealRaf = useRef<number | null>(null);
+  // The in-flight turn's abort handles: the controller cancels the network fetch, and stopRef holds a
+  // closure that also freezes the reveal and ends the turn cleanly. Both are set while a turn streams
+  // and cleared when it finishes (see finish); the Stop button and unmount use them.
+  const abortRef = useRef<AbortController | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
   const barRO = useRef<ResizeObserver | null>(null);
   const stuckRef = useRef(true); // is auto-scroll following the bottom? false once the user scrolls up
   const welcomeDone = welcome.length >= WELCOME.length;
@@ -340,8 +345,9 @@ function ChatPanel() {
   }, []);
   useEffect(() => () => barRO.current?.disconnect(), []);
 
-  // Stop the reveal loop if the widget unmounts mid-stream.
+  // Cancel an in-flight turn if the widget unmounts mid-stream — abort the fetch and stop the reveal.
   useEffect(() => () => {
+    abortRef.current?.abort();
     if (revealRaf.current != null) cancelAnimationFrame(revealRaf.current);
   }, []);
 
@@ -593,6 +599,8 @@ function ChatPanel() {
 
     const finish = () => {
       revealRaf.current = null;
+      abortRef.current = null;
+      stopRef.current = null;
       closeOpenTools();
       setBusy(false);
       setStatus(null);
@@ -644,6 +652,53 @@ function ChatPanel() {
       }
     };
 
+    // This turn's abort controller — passed to fetch so Stop cancels the network, and used to make the
+    // cold-start waits abortable and to tear the turn down on unmount.
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Abortable delay: resolves after ms, or rejects the instant the turn is stopped, so a Stop during
+    // the cold-start wait takes effect immediately rather than after the timer runs out.
+    const wait = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        controller.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t);
+            reject(new DOMException('Aborted', 'AbortError'));
+          },
+          { once: true },
+        );
+      });
+
+    // Stop the turn: cancel the network, halt the reveal, keep whatever already streamed in (an
+    // early stop with nothing yet drops the empty bubble), and end the turn — without the error text
+    // or Retry a real failure would show. The aborted fetch rejects into the catch below, which sees
+    // `signal.aborted` and bows out, so this runs exactly once.
+    const stopTurn = () => {
+      if (controller.signal.aborted) return;
+      controller.abort();
+      if (revealRaf.current != null) {
+        cancelAnimationFrame(revealRaf.current);
+        revealRaf.current = null;
+      }
+      const leftover = pending; // received but not yet revealed — real content, so keep it
+      pending = '';
+      setMessages((m) => {
+        const last = m[m.length - 1];
+        if (!last || last.role !== 'assistant') return m;
+        const content = last.content + leftover;
+        if (!content && !last.tools?.length) return m.slice(0, -1); // nothing streamed → no blank row
+        const copy = [...m];
+        copy[copy.length - 1] = { ...last, content };
+        return copy;
+      });
+      setQueue([]); // Stop means stop — don't let the drain effect fire anything queued behind this turn
+      finish();
+    };
+    stopRef.current = stopTurn;
+
     const requestBody = JSON.stringify({ message: text, conversation_id: conversationId.current });
 
     // The free-tier backend sleeps; a cold start returns 502/503 (with no CORS
@@ -656,17 +711,19 @@ function ChatPanel() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: requestBody,
+            signal: controller.signal,
           });
           if ([502, 503, 504].includes(res.status) && attempt < maxAttempts) {
             setStatus('waking the assistant up…');
-            await new Promise((r) => setTimeout(r, 6000));
+            await wait(6000);
             continue;
           }
           return res;
         } catch (e) {
-          if (attempt >= maxAttempts) throw e;
+          // A stopped turn must not keep retrying — bail straight to the catch below.
+          if (controller.signal.aborted || attempt >= maxAttempts) throw e;
           setStatus('waking the assistant up…');
-          await new Promise((r) => setTimeout(r, 6000));
+          await wait(6000);
         }
       }
       throw new Error('unreachable');
@@ -758,6 +815,9 @@ function ChatPanel() {
       netDone = true;
       ensureDraining(); // flush whatever's left, then finish()
     } catch (err) {
+      // The user stopped the turn — stopTurn already froze the reply and ended it cleanly, so a
+      // stop is not a failure: no error text, no Retry.
+      if (controller.signal.aborted) return;
       if (revealRaf.current != null) {
         cancelAnimationFrame(revealRaf.current);
         revealRaf.current = null;
@@ -1152,9 +1212,23 @@ function ChatPanel() {
                   // Stays editable throughout the turn: you can compose (and queue) the next prompt
                   // while a reply is still streaming. `send` decides whether to run or queue it.
                 />
-                <button className="sfchat-send" type="submit" disabled={!input.trim()} aria-label="Send">
-                  <SendIcon />
-                </button>
+                {busy && (
+                  // Stop the streaming reply. Sits alongside Send (not replacing it) so a prompt typed
+                  // to queue can still be sent while a turn is running.
+                  <button
+                    type="button"
+                    className="sfchat-stop"
+                    onClick={() => stopRef.current?.()}
+                    aria-label="Stop generating"
+                  >
+                    <StopIcon />
+                  </button>
+                )}
+                {(!busy || !!input.trim()) && (
+                  <button className="sfchat-send" type="submit" disabled={!input.trim()} aria-label="Send">
+                    <SendIcon />
+                  </button>
+                )}
               </div>
               <p className="sfchat-note">
                 <span className="sfchat-note-text">
@@ -1211,6 +1285,14 @@ function JumpIcon() {
 }
 function SendIcon() {
   return <ArrowUp size={18} strokeWidth={2.25} />;
+}
+function StopIcon() {
+  // A filled rounded square — the universal "stop" glyph.
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+    </svg>
+  );
 }
 function ArrowIcon() {
   return <ArrowUpRight size={14} strokeWidth={2} />;
@@ -1569,6 +1651,16 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-send { width: 42px; height: 42px; flex-shrink: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center; transition: opacity .15s ease, transform .12s ease; }
 .sfchat-send:hover:not(:disabled) { transform: scale(1.05); }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Stop generating: a neutral, bordered button (not the accent send) that appears while a reply
+   streams. It warms to the danger colour on hover to read as "halt", without shouting by default. */
+.sfchat-stop {
+  width: 42px; height: 42px; flex-shrink: 0; border-radius: 11px; cursor: pointer;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+  transition: color .15s ease, border-color .15s ease, background .15s ease, transform .12s ease;
+}
+.sfchat-stop:hover { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); transform: scale(1.05); }
 
 /* Prompt queue: prompts typed while a reply is still streaming. They sit above the composer and
    fire automatically, in order, as each reply completes. Accent-tinted so they read as pending
