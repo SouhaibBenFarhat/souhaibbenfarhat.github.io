@@ -137,11 +137,13 @@ const MessageMarkdown = memo(function MessageMarkdown({ text }: { text: string }
 
 // Inline error text for the assistant bubble: the friendly message on its own line, and — for a
 // backend error frame — the raw technical `detail` in a code block below it, so a multi-line
-// provider exception stays legible. `detail` is an owner-only field, which is safe here because the
-// whole panel is owner-gated (?internal=1). No detail (or a transport error) → just the message.
+// provider exception stays legible. `detail` is an owner-only field (a raw provider exception).
+// The panel used to be owner-gated, which made showing it safe; now that the chat is public it's
+// shown ONLY in internal/owner mode (`?internal=1`), never to a regular visitor. No detail, not the
+// owner, or a transport error → just the friendly message.
 function formatStreamError(message: string, detail?: string): string {
   const friendly = `⚠️ ${message}`;
-  return detail ? `${friendly}\n\n\`\`\`\n${detail}\n\`\`\`` : friendly;
+  return detail && isInternal() ? `${friendly}\n\n\`\`\`\n${detail}\n\`\`\`` : friendly;
 }
 
 function TypingDots() {
@@ -247,15 +249,17 @@ function ContextGauge({ usage }: { usage: ChatUsage | null }) {
   );
 }
 
-// The AI chat isn't ready for the public yet, so it's gated behind internal/owner mode
-// (visit once with `?internal=1`). The panel — with all its hooks and body-shifting
-// side effects — only mounts for internal browsers; everyone else renders nothing.
+// The chat is public — it renders for every visitor. It still mounts only after a client-side
+// effect (rendering nothing on the server and on the first hydration pass), so ChatPanel's
+// localStorage-derived initial state can't cause a hydration mismatch and its body-shifting side
+// effects never run on the server. Owner mode (`?internal=1` → isInternal) lives on, but now only
+// to opt the owner out of analytics and to show raw error detail to the owner alone.
 export default function ChatWidget() {
-  const [internal, setInternal] = useState(false);
+  const [mounted, setMounted] = useState(false);
   // Per-mount client, so nothing is cached across mounts (or across tests).
   const [queryClient] = useState(createQueryClient);
-  useEffect(() => setInternal(isInternal()), []);
-  return internal ? (
+  useEffect(() => setMounted(true), []);
+  return mounted ? (
     <QueryClientProvider client={queryClient}>
       <ChatPanel />
     </QueryClientProvider>

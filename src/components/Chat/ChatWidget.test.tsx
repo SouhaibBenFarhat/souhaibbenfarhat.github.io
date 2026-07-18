@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatWidget, { completeMarkdown } from './ChatWidget';
 
-// The widget renders nothing unless the browser is in internal/owner mode.
-vi.mock('../../lib/internal', () => ({ isInternal: () => true }));
+// Owner/internal mode. The chat is public, so this no longer gates rendering — it only decides
+// whether raw error `detail` is shown (owner) or hidden (public). Controllable per test; most tests
+// run as the owner so the existing detail assertions hold. Reset to owner in beforeEach.
+const { mockInternal } = vi.hoisted(() => ({ mockInternal: { value: true } }));
+vi.mock('../../lib/internal', () => ({ isInternal: () => mockInternal.value }));
 
 const API = 'https://api.test'; // pinned in vitest.config.ts
 const CID = 'c0ffee00-dead-beef-cafe-000000000001';
@@ -65,6 +68,7 @@ const streamCalls = () => calls.filter((c) => c.url.endsWith('/chat/stream'));
 const rateCalls = () => calls.filter((c) => c.url.includes('/rating/'));
 
 beforeEach(() => {
+  mockInternal.value = true; // owner by default; the public-visitor tests flip this
   calls = [];
   deleteStatus = 204;
   restoreUsage = USAGE;
@@ -1024,6 +1028,31 @@ describe('ChatWidget — follow-up suggestions', () => {
 
     await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
     expect(screen.queryByText('Ask a follow-up')).toBeNull();
+  });
+});
+
+describe('ChatWidget — public visitor', () => {
+  it('renders for a visitor who is not in owner mode', async () => {
+    mockInternal.value = false; // a regular visitor — no ?internal=1
+    render(<ChatWidget />);
+    // The panel mounts and opens for everyone now; it is no longer owner-gated.
+    expect(await screen.findByRole('button', { name: 'Minimize' })).not.toBeNull();
+  });
+
+  it('hides the raw error detail from a public visitor, keeping the friendly message', async () => {
+    mockInternal.value = false;
+    streamFrames = [
+      { conversation_id: CID },
+      { error: 'The assistant hit a snag.', detail: 'ProviderError: upstream 500' },
+      { done: true },
+    ];
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('⚠️ The assistant hit a snag.')).not.toBeNull(), SETTLED);
+    // The raw provider exception is owner-only — a regular visitor must never see it.
+    expect(screen.queryByText('ProviderError: upstream 500')).toBeNull();
   });
 });
 
