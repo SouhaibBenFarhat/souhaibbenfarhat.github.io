@@ -44,28 +44,35 @@ function sseBody(frames: unknown[]) {
 // settled load needs longer than waitFor's 1s default.
 const SETTLED = { timeout: 3000 };
 
-type Call = { url: string; method: string };
+type Call = { url: string; method: string; body?: string };
 let calls: Call[] = [];
 /** Status the stubbed backend answers DELETE with. */
 let deleteStatus = 204;
 /** Usage the stubbed restore endpoint reports. */
 let restoreUsage: unknown = USAGE;
+/** Messages the stubbed restore endpoint returns. */
+let restoreMessages: unknown = RESTORED;
 /** Status the stubbed /chat/stream answers with, and the frames it streams on a 200. */
 let streamStatus = 200;
 let streamFrames: unknown[] = [];
 /** Body the stubbed /chat/stream answers a 403 with. */
 let forbiddenBody: unknown = null;
+/** Status the stubbed rating endpoint answers with. */
+let ratingStatus = 200;
 
 const deleteCalls = () => calls.filter((c) => c.method === 'DELETE');
 const streamCalls = () => calls.filter((c) => c.url.endsWith('/chat/stream'));
+const rateCalls = () => calls.filter((c) => c.url.includes('/rating/'));
 
 beforeEach(() => {
   calls = [];
   deleteStatus = 204;
   restoreUsage = USAGE;
+  restoreMessages = RESTORED;
   streamStatus = 200;
   streamFrames = [{ conversation_id: CID }, { text: 'Sure.' }, { done: true }];
   forbiddenBody = null;
+  ratingStatus = 200;
   streamGate = null;
   releaseStream = () => {};
   localStorage.clear();
@@ -74,7 +81,7 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
-      calls.push({ url: String(url), method });
+      calls.push({ url: String(url), method, body: init?.body ? String(init.body) : undefined });
       // A real request always takes at least a tick. Resolving in a microtask lets React
       // batch the pending state away entirely, so the loading flag is never rendered — and
       // a floor over a state that never rendered is meaningless (nothing flashed either).
@@ -84,13 +91,22 @@ beforeEach(() => {
         if (streamStatus === 403) return { ok: false, status: 403, json: async () => forbiddenBody };
         return { ok: true, status: 200, body: sseBody(streamFrames) };
       }
+      // Rate a message: echoes back the value it was sent, like the real endpoint.
+      if (String(url).includes('/rating/')) {
+        const sent = init?.body ? JSON.parse(String(init.body)) : {};
+        return {
+          ok: ratingStatus >= 200 && ratingStatus < 300,
+          status: ratingStatus,
+          json: async () => ({ id: 1, rating: sent.rating === 0 ? null : sent.rating }),
+        };
+      }
       if (method === 'DELETE') {
         return { ok: deleteStatus >= 200 && deleteStatus < 300, status: deleteStatus };
       }
       return {
         ok: true,
         status: 200,
-        json: async () => ({ id: CID, messages: RESTORED, usage: restoreUsage }),
+        json: async () => ({ id: CID, messages: restoreMessages, usage: restoreUsage }),
       };
     }),
   );
@@ -815,6 +831,199 @@ describe('ChatWidget — collapse and reopen', () => {
     render(<ChatWidget />);
     const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
     expect(css).toMatch(/\.sfchat-open\s+\.sfchat-composer[^{]*\{[^}]*pointer-events:\s*auto/);
+  });
+});
+
+describe('ChatWidget — rating a message', () => {
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  const ratedUp = () => screen.getByRole('button', { name: 'Good response' });
+  const ratedDown = () => screen.getByRole('button', { name: 'Bad response' });
+
+  it('shows no thumbs until a reply is persisted (has a message id)', async () => {
+    // A turn with no ChatMessageIdFrame — the reply was never saved, so there's nothing to rate.
+    streamFrames = [{ conversation_id: CID }, { text: 'Unsaved answer.' }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Unsaved answer.')).not.toBeNull(), SETTLED);
+    expect(screen.queryByRole('button', { name: 'Good response' })).toBeNull();
+  });
+
+  it('rates a streamed reply up, PUTting the value to its own message endpoint', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'Here is an answer.' },
+      { message_id: 42 },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+    const up = await screen.findByRole('button', { name: 'Good response' }, SETTLED);
+
+    fireEvent.click(up);
+
+    await waitFor(() => expect(rateCalls()).toHaveLength(1), SETTLED);
+    const call = rateCalls()[0];
+    expect(call.url).toBe(`${API}/chat/conversations/${CID}/messages/42/rating/`);
+    expect(call.method).toBe('PUT');
+    expect(JSON.parse(call.body ?? '{}')).toEqual({ rating: 1 });
+    expect(ratedUp().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('clears the rating when the active thumb is clicked again (sends 0)', async () => {
+    streamFrames = [{ conversation_id: CID }, { text: 'A.' }, { message_id: 7 }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+    const down = await screen.findByRole('button', { name: 'Bad response' }, SETTLED);
+
+    fireEvent.click(down);
+    await waitFor(() => expect(rateCalls()).toHaveLength(1), SETTLED);
+    expect(JSON.parse(rateCalls()[0].body ?? '{}')).toEqual({ rating: -1 });
+    expect(ratedDown().getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(down); // re-click the active thumb → clear
+    await waitFor(() => expect(rateCalls()).toHaveLength(2), SETTLED);
+    expect(JSON.parse(rateCalls()[1].body ?? '{}')).toEqual({ rating: 0 });
+    expect(ratedDown().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('replaces an up rating with a down when the other thumb is clicked', async () => {
+    streamFrames = [{ conversation_id: CID }, { text: 'A.' }, { message_id: 7 }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+    const up = await screen.findByRole('button', { name: 'Good response' }, SETTLED);
+
+    fireEvent.click(up);
+    await waitFor(() => expect(rateCalls()).toHaveLength(1), SETTLED);
+    fireEvent.click(ratedDown());
+
+    await waitFor(() => expect(rateCalls()).toHaveLength(2), SETTLED);
+    expect(JSON.parse(rateCalls()[1].body ?? '{}')).toEqual({ rating: -1 });
+    expect(up.getAttribute('aria-pressed')).toBe('false');
+    expect(ratedDown().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('pre-selects the stored rating on a restored reply', async () => {
+    restoreMessages = [
+      { id: 1, role: 'user', content: 'A question', rating: null },
+      { id: 2, role: 'assistant', content: 'A previously rated answer.', rating: 1 },
+    ];
+    await renderRestored();
+
+    expect(ratedUp().getAttribute('aria-pressed')).toBe('true');
+    expect(ratedDown().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('rolls the thumb back if the rating request fails', async () => {
+    ratingStatus = 500;
+    streamFrames = [{ conversation_id: CID }, { text: 'A.' }, { message_id: 9 }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+    const up = await screen.findByRole('button', { name: 'Good response' }, SETTLED);
+
+    fireEvent.click(up);
+    // Reflected optimistically the instant it's clicked — the filled thumb is the feedback.
+    expect(up.getAttribute('aria-pressed')).toBe('true');
+    // Then rolled back once the backend refuses, so the UI never claims a rating that didn't stick.
+    await waitFor(() => expect(up.getAttribute('aria-pressed')).toBe('false'), SETTLED);
+  });
+
+  it('offers no thumbs while the reply is still streaming, only once it lands', async () => {
+    streamFrames = [{ conversation_id: CID }, { text: 'still going' }, { message_id: 5 }];
+    streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('still going')).not.toBeNull(), SETTLED);
+    // The turn hasn't ended (stream held open) — no rating controls mid-answer.
+    expect(screen.queryByRole('button', { name: 'Good response' })).toBeNull();
+
+    releaseStream();
+    await screen.findByRole('button', { name: 'Good response' }, SETTLED);
+  });
+
+  it('offers no thumbs on a turn that failed', async () => {
+    streamFrames = [{ conversation_id: CID }, { error: 'boom' }, { done: true }];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('⚠️ boom')).not.toBeNull(), SETTLED);
+    expect(screen.queryByRole('button', { name: 'Good response' })).toBeNull();
+  });
+});
+
+describe('ChatWidget — follow-up suggestions', () => {
+  async function openPanel() {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+  }
+
+  it('renders the agent follow-ups as chips under the reply', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'Answer.' },
+      { suggestions: ['What has he built recently?', 'Where is he based?'] },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Ask a follow-up')).not.toBeNull(), SETTLED);
+    expect(screen.getByRole('button', { name: 'What has he built recently?' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Where is he based?' })).not.toBeNull();
+  });
+
+  it('sends a follow-up as the next message when its chip is clicked', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'Answer.' },
+      { suggestions: ['Ask this next'] },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+    const chip = await screen.findByRole('button', { name: 'Ask this next' }, SETTLED);
+
+    streamFrames = [{ conversation_id: CID }, { text: 'Follow-up answer.' }, { done: true }];
+    fireEvent.click(chip);
+
+    await waitFor(() => expect(streamCalls()).toHaveLength(2), SETTLED);
+    // The last stream carried the suggestion as the user's message.
+    expect(JSON.parse(streamCalls()[1].body ?? '{}').message).toBe('Ask this next');
+    await waitFor(() => expect(screen.getByText('Follow-up answer.')).not.toBeNull(), SETTLED);
+  });
+
+  it('drops the follow-ups once a newer turn arrives', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'First.' },
+      { suggestions: ['Older follow-up'] },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+    await screen.findByRole('button', { name: 'Older follow-up' }, SETTLED);
+
+    streamFrames = [{ conversation_id: CID }, { text: 'Second.' }, { done: true }]; // no suggestions
+    sendMessage('again');
+
+    await waitFor(() => expect(screen.getByText('Second.')).not.toBeNull(), SETTLED);
+    // The earlier turn's chips belong to the latest reply only — they don't linger under old ones.
+    expect(screen.queryByRole('button', { name: 'Older follow-up' })).toBeNull();
+  });
+
+  it('shows no follow-up row when the turn sends none', async () => {
+    await openPanel(); // default streamFrames carry no suggestions
+    sendMessage('hi');
+
+    await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
+    expect(screen.queryByText('Ask a follow-up')).toBeNull();
   });
 });
 
