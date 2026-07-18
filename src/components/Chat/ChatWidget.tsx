@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Cpu, Info, MessageSquare, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Cpu, Info, MessageSquare, RotateCcw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -9,6 +9,7 @@ import { isInternal } from '../../lib/internal';
 import { createQueryClient } from '../../lib/queries/client';
 import { useConversation, type ChatUsage, type Message } from '../../lib/queries/useConversation';
 import { useDeleteConversation } from '../../lib/queries/useDeleteConversation';
+import { useRateMessage, type RatingValue } from '../../lib/queries/useRateMessage';
 
 // Fallback labels for backends that don't send a per-frame `label` yet. The stream now carries a
 // human-readable `label` on each tool frame (ChatToolFrame), which is preferred; this map only
@@ -39,9 +40,21 @@ function modelLabel(id: string): string {
 // frame. Attached to the message locally — the restore endpoint doesn't persist tool steps, so
 // they survive the turn but not a reload.
 type ToolStep = { tool: string; label: string; done: boolean };
-// `errored` marks a turn whose stream failed, so a Retry control renders under it. The error text
-// itself lives in `content` (surfaced inline), so it survives in the message list like any reply.
-type ChatMessage = Message & { tools?: ToolStep[]; errored?: boolean; model?: string };
+// A message as the client holds it. The API's Message carries an `id` and a `rating` on every
+// persisted row, but a just-sent turn exists locally before it's persisted: the user echo and the
+// empty assistant bubble are created with neither, and they arrive later — the id from a
+// ChatMessageIdFrame mid-stream, the rating only once the visitor clicks a thumb. So widen those
+// two to optional here, then add the client-only fields the stream attaches over the turn.
+type ChatMessage = Omit<Message, 'id' | 'rating'> & {
+  id?: number; // the persisted message's id — from a ChatMessageIdFrame, or from a restore. The rating target.
+  rating?: number | null; // stored thumbs: +1 up, -1 down, null/absent until rated.
+  tools?: ToolStep[]; // tool steps taken this turn (not persisted across a reload).
+  // `errored` marks a turn whose stream failed, so a Retry control renders under it. The error text
+  // itself lives in `content` (surfaced inline), so it survives in the message list like any reply.
+  errored?: boolean;
+  model?: string; // which model answered (from a ChatModelFrame).
+  suggestions?: string[]; // follow-up chips the agent offered (from a ChatSuggestionsFrame).
+};
 
 const WELCOME =
   "Hey 👋 I'm Souhaib's assistant. Ask me about his projects, experience, skills, or " +
@@ -289,6 +302,7 @@ function ChatPanel() {
 
   const restore = useConversation(storedId);
   const del = useDeleteConversation();
+  const rate = useRateMessage();
   const loadingHistory = restore.isLoading; // floored — the skeleton never flashes
   const deleting = del.isDeleting; // floored — "Deleting…" is always readable
   const deleteFailed = del.isError && !deleting;
@@ -524,6 +538,28 @@ function ChatPanel() {
         return copy;
       });
 
+    // Stamp the persisted reply's id onto the current assistant message (a ChatMessageIdFrame, sent
+    // once after the answer). It's what the rating endpoint targets, so thumbs can appear on the
+    // fresh reply without waiting for a reload. Absent when the turn broke and nothing was saved.
+    const setLastMessageId = (id: number) =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, id };
+        return copy;
+      });
+
+    // Attach the agent's follow-up suggestions to the current assistant message (a
+    // ChatSuggestionsFrame, sent once near the end). Rendered as tappable chips under the reply,
+    // but only while it's the latest turn — so they read as "ask next", not as history.
+    const setLastSuggestions = (suggestions: string[]) =>
+      setMessages((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        copy[copy.length - 1] = { ...last, suggestions };
+        return copy;
+      });
+
     // Close any step still marked running when the turn ends. Normally every tool got its `end`
     // frame before the text streamed, so this is a no-op; it just stops a spinner outliving the
     // turn if the stream is cut short or errors mid-tool.
@@ -688,6 +724,12 @@ function ChatPanel() {
           // rather than adding to it. Absent when the provider reported no usage: keep what
           // we had, since resetting to zero would claim the context emptied, which is a lie.
           if (data.usage) setUsage(data.usage);
+          // The persisted reply's id (sent once after the answer). Stamped onto the message so its
+          // thumbs-up/down controls target the right row without a reload.
+          if (typeof data.message_id === 'number') setLastMessageId(data.message_id);
+          // Follow-up chips (sent once, near the end). Guard for a non-empty array — the backend
+          // omits the frame when it has none, but never render an empty suggestion row regardless.
+          if (Array.isArray(data.suggestions) && data.suggestions.length) setLastSuggestions(data.suggestions);
           if (data.text) {
             setStatus(null);
             pending += data.text; // reveal loop paints it at a steady pace
@@ -748,6 +790,27 @@ function ChatPanel() {
     stuckRef.current = true;
     setShowJump(false);
     streamTurn(userMsg.content);
+  };
+
+  // Thumbs up / down on a persisted assistant message. Clicking the value already set clears it
+  // (0), so the same button toggles a rating off. The message list is the source of truth for
+  // what's shown, so update it optimistically — the filled thumb IS the feedback — and roll back
+  // to the previous value if the request fails, matching by id since indices can shift under a
+  // concurrent turn. Keyed on the persisted message id, so a message with none (still streaming, or
+  // a turn that broke before it was saved) simply isn't ratable.
+  const rateMessage = (messageId: number, value: 1 | -1) => {
+    const cid = conversationId.current;
+    if (!cid) return;
+    const prev = messages.find((m) => m.id === messageId)?.rating ?? null;
+    const next: RatingValue = prev === value ? 0 : value; // re-click the active thumb → clear it
+    setMessages((m) => m.map((x) => (x.id === messageId ? { ...x, rating: next === 0 ? null : next } : x)));
+    rate.mutate(
+      { conversationId: cid, messageId, rating: next },
+      {
+        onError: () =>
+          setMessages((m) => m.map((x) => (x.id === messageId ? { ...x, rating: prev } : x))),
+      },
+    );
   };
 
   const idle = messages.length === 0;
@@ -910,12 +973,19 @@ function ChatPanel() {
                 );
               }
               const tools = m.tools ?? [];
-              const turnActive = i === messages.length - 1 && busy;
+              const isLast = i === messages.length - 1;
+              const turnActive = isLast && busy;
               // Typing dots cover only the initial think before any tool appears; once a tool shows,
               // the timeline is the indicator (dots here would flash on and off between steps). They
               // also stand down while a status line is up (the cold-start notice), so the two don't
               // both show at once.
               const showTyping = turnActive && !m.content && tools.length === 0 && !status;
+              // Thumbs show on a persisted reply (it has an id) that actually answered — never on the
+              // still-streaming turn, and never on a failed one (which carries its error as content).
+              const canRate = m.id != null && !!m.content && !m.errored && !turnActive;
+              // Follow-up chips belong to the latest turn only, once it's done — so they read as the
+              // next thing to ask, not as leftovers stuck under an old message.
+              const followups = isLast && !turnActive && !exhausted ? m.suggestions ?? [] : [];
               return (
                 <div key={i} className="sfchat-row assistant sfchat-enter">
                   <span className="sfchat-avatar sm"><AgentIcon /></span>
@@ -930,17 +1000,54 @@ function ChatPanel() {
                         )}
                       </div>
                     )}
-                    {m.model && (
-                      <span className="sfchat-model">
-                        <Cpu size={11} strokeWidth={2} />
-                        {modelLabel(m.model)}
-                      </span>
+                    {(m.model || canRate) && (
+                      <div className="sfchat-meta">
+                        {m.model && (
+                          <span className="sfchat-model">
+                            <Cpu size={11} strokeWidth={2} />
+                            {modelLabel(m.model)}
+                          </span>
+                        )}
+                        {canRate && (
+                          <div className="sfchat-rate" role="group" aria-label="Rate this reply">
+                            <button
+                              type="button"
+                              className={`sfchat-rate-btn ${m.rating === 1 ? 'active' : ''}`}
+                              aria-label="Good response"
+                              aria-pressed={m.rating === 1}
+                              onClick={() => rateMessage(m.id as number, 1)}
+                            >
+                              <ThumbsUp size={13} strokeWidth={2} />
+                            </button>
+                            <button
+                              type="button"
+                              className={`sfchat-rate-btn ${m.rating === -1 ? 'active' : ''}`}
+                              aria-label="Bad response"
+                              aria-pressed={m.rating === -1}
+                              onClick={() => rateMessage(m.id as number, -1)}
+                            >
+                              <ThumbsDown size={13} strokeWidth={2} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    {m.errored && i === messages.length - 1 && !busy && !exhausted && (
+                    {m.errored && isLast && !busy && !exhausted && (
                       <button type="button" className="sfchat-retry" onClick={() => retryFrom(i)}>
                         <RetryIcon />
                         Retry
                       </button>
+                    )}
+                    {followups.length > 0 && (
+                      <div className="sfchat-followups">
+                        <span className="sfchat-suglabel">Ask a follow-up</span>
+                        {followups.map((s) => (
+                          <button key={s} type="button" className="sfchat-chip" onClick={() => send(s)}>
+                            <span>{s}</span>
+                            <ArrowIcon />
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1305,6 +1412,31 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 }
 .sfchat-retry:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .sfchat-retry svg { flex-shrink: 0; }
+
+/* Meta row under a reply: the answering-model caption and the thumbs share one line, left-aligned. */
+.sfchat-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Message rating: a quiet thumbs up/down pair. Muted until hovered; the chosen thumb stays filled
+   with an accent-tinted pill — the same "selected" language used across the panel, so a downvote
+   reads as feedback, not an error (no danger colour). */
+.sfchat-rate { display: inline-flex; align-items: center; gap: 2px; }
+/* Pull the thumbs to the content edge only when they lead the row (no model caption before them),
+   so the icon's optical edge lines up with the reply text above. */
+.sfchat-meta > .sfchat-rate:first-child { margin-left: -5px; }
+.sfchat-rate-btn {
+  display: grid; place-items: center; padding: 5px; border-radius: 7px;
+  background: none; border: none; cursor: pointer; color: var(--muted);
+  transition: color .15s ease, background .15s ease;
+}
+.sfchat-rate-btn svg { display: block; transition: fill .15s ease; }
+.sfchat-rate-btn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sfchat-rate-btn.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sfchat-rate-btn.active svg { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* Follow-up suggestions: the agent's proposed next questions, as chips under the latest reply.
+   Reuses .sfchat-chip; this only stacks them under a quiet caption, aligned to the message body. */
+.sfchat-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin-top: 2px; }
+.sfchat-followups .sfchat-suglabel { margin-bottom: 1px; }
 
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }

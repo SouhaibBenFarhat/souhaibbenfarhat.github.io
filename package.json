@@ -10,6 +10,7 @@
     "typecheck": "astro check",
     "test": "vitest run",
     "test:watch": "vitest",
+    "mock": "node scripts/mock-chat-backend.mjs",
     "gen:api": "openapi-typescript https://raw.githubusercontent.com/SouhaibBenFarhat/portfolio-backend/main/openapi.yaml -o src/lib/api-types.ts"
   },
   "dependencies": {
