@@ -101,7 +101,7 @@ export interface paths {
          * Stream an assistant reply (Server-Sent Events)
          * @description Runs the LangGraph agent and streams its reply as `text/event-stream`.
          *
-         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then a `ChatModelFrame` naming the answering model, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
+         *     The body is `data: <json>\n\n` frames: first a `ChatConversationIdFrame`, then a `ChatModelFrame` naming the answering model, then `ChatTextFrame` tokens interleaved with `ChatToolFrame` steps, then a `ChatUsageFrame`, a `ChatSuggestionsFrame` with follow-up chips, and finally a `ChatDoneFrame` (or a `ChatErrorFrame` then done). Guarded by a per-IP rate limit and a message-length cap.
          */
         post: operations["chat_stream_create"];
         delete?: never;
@@ -198,9 +198,14 @@ export interface components {
             /** @enum {string} */
             status: "start" | "end";
         };
-        /** @description How full the thread's context is, for the client's gauge. Sent once, just before the done frame, and omitted when the provider reported no usage. */
+        /** @description How full the thread's context is, for the client's gauge. Sent once, once the answer is complete, and omitted when the provider reported no usage. */
         ChatUsageFrame: {
             usage: components["schemas"]["ChatUsage"];
+        };
+        /** @description Follow-up questions the visitor could ask next, rendered as tappable chips. Sent once, after the usage frame and just before done; omitted when no model actually answered, the thread spent its budget, or nothing usable was generated — chips simply don't appear that turn. */
+        ChatSuggestionsFrame: {
+            /** @description Up to 3 short questions, in the visitor's voice. */
+            suggestions: string[];
         };
         /** @description The turn failed. Can arrive after some answer text has already streamed (a failure on the step after a tool call), so treat it as ending the turn, not as replacing what was shown. */
         ChatErrorFrame: {
@@ -215,7 +220,7 @@ export interface components {
             done: true;
         };
         /** @description One Server-Sent Events frame. Each `data:` line is one of these. */
-        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatModelFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
+        ChatStreamFrame: components["schemas"]["ChatConversationIdFrame"] | components["schemas"]["ChatModelFrame"] | components["schemas"]["ChatTextFrame"] | components["schemas"]["ChatToolFrame"] | components["schemas"]["ChatUsageFrame"] | components["schemas"]["ChatSuggestionsFrame"] | components["schemas"]["ChatErrorFrame"] | components["schemas"]["ChatDoneFrame"];
     };
     responses: never;
     parameters: never;
