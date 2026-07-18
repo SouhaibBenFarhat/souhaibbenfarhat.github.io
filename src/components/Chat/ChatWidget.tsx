@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Cpu, Info, MessageSquare, RotateCcw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Bot, Check, ChevronDown, Info, MessageSquare, RotateCcw, ThumbsDown, ThumbsUp, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -825,6 +825,13 @@ function ChatPanel() {
   // *next* send is refused, and "start a new chat" must not be reachable mid-stream — deleting
   // there would clear the messages the reveal loop is still writing into.
   const exhausted = usage?.exhausted === true && !busy;
+  // The model that answered the latest turn, shown in the header beside "online". Model lives
+  // per-message (set from a ChatModelFrame); this reflects the most recent one. It isn't persisted,
+  // so after a reload the header shows just "online" until the next turn names a model.
+  const currentModel = messages.reduce<string | undefined>(
+    (found, m) => (m.role === 'assistant' && m.model ? m.model : found),
+    undefined,
+  );
 
   // Drain the queue: the moment the agent is free, send everything queued as ONE combined follow-up
   // turn (newline-joined), the way Claude Code batches messages typed while it's working — not as
@@ -872,7 +879,10 @@ function ChatPanel() {
             <div>
               <strong>Souhaib’s assistant</strong>
               <span className="sfchat-online">
-                <i /> online
+                <i />
+                <span className="sfchat-online-label">
+                  online{currentModel ? ` · ${modelLabel(currentModel)}` : ''}
+                </span>
               </span>
             </div>
           </div>
@@ -1004,36 +1014,26 @@ function ChatPanel() {
                         )}
                       </div>
                     )}
-                    {(m.model || canRate) && (
-                      <div className="sfchat-meta">
-                        {m.model && (
-                          <span className="sfchat-model">
-                            <Cpu size={11} strokeWidth={2} />
-                            {modelLabel(m.model)}
-                          </span>
-                        )}
-                        {canRate && (
-                          <div className="sfchat-rate" role="group" aria-label="Rate this reply">
-                            <button
-                              type="button"
-                              className={`sfchat-rate-btn ${m.rating === 1 ? 'active' : ''}`}
-                              aria-label="Good response"
-                              aria-pressed={m.rating === 1}
-                              onClick={() => rateMessage(m.id as number, 1)}
-                            >
-                              <ThumbsUp size={13} strokeWidth={2} />
-                            </button>
-                            <button
-                              type="button"
-                              className={`sfchat-rate-btn ${m.rating === -1 ? 'active' : ''}`}
-                              aria-label="Bad response"
-                              aria-pressed={m.rating === -1}
-                              onClick={() => rateMessage(m.id as number, -1)}
-                            >
-                              <ThumbsDown size={13} strokeWidth={2} />
-                            </button>
-                          </div>
-                        )}
+                    {canRate && (
+                      <div className="sfchat-rate" role="group" aria-label="Rate this reply">
+                        <button
+                          type="button"
+                          className={`sfchat-rate-btn ${m.rating === 1 ? 'active' : ''}`}
+                          aria-label="Good response"
+                          aria-pressed={m.rating === 1}
+                          onClick={() => rateMessage(m.id as number, 1)}
+                        >
+                          <ThumbsUp size={13} strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`sfchat-rate-btn ${m.rating === -1 ? 'active' : ''}`}
+                          aria-label="Bad response"
+                          aria-pressed={m.rating === -1}
+                          onClick={() => rateMessage(m.id as number, -1)}
+                        >
+                          <ThumbsDown size={13} strokeWidth={2} />
+                        </button>
                       </div>
                     )}
                     {m.errored && isLast && !busy && !exhausted && (
@@ -1044,7 +1044,6 @@ function ChatPanel() {
                     )}
                     {followups.length > 0 && (
                       <div className="sfchat-followups">
-                        <span className="sfchat-suglabel">Ask a follow-up</span>
                         {followups.map((s) => (
                           <button key={s} type="button" className="sfchat-chip" onClick={() => send(s)}>
                             <span>{s}</span>
@@ -1274,8 +1273,11 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-id { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .sfchat-id > div { min-width: 0; }
 .sfchat-id strong { display: block; font-size: 14.5px; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sfchat-online { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.sfchat-online i { width: 6px; height: 6px; border-radius: 50%; background: #38b26a; animation: sfchat-live 2s ease-out infinite; }
+.sfchat-online { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-top: 2px; min-width: 0; }
+.sfchat-online i { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: #38b26a; animation: sfchat-live 2s ease-out infinite; }
+/* Status text — "online", plus the answering model once a turn has replied. Truncates rather than
+   wrap or widen the header, so a long raw model id stays on one line. */
+.sfchat-online-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @keyframes sfchat-live { 0% { box-shadow: 0 0 0 0 rgba(56,178,106,.5); } 70%,100% { box-shadow: 0 0 0 5px rgba(56,178,106,0); } }
 
 .sfchat-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 14px; background: var(--accent); color: #fff; }
@@ -1389,9 +1391,6 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .dark .sfchat-tl-step.done .sfchat-tl-node { color: #08272a; }
 @keyframes sfchat-nodepop { from { transform: scale(.5); } to { transform: scale(1); } }
 
-/* Answering-model caption: a quiet line under the reply naming the model that produced it. */
-.sfchat-model { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted); padding-left: 2px; }
-.sfchat-model svg { opacity: .75; }
 
 .sfchat-tl-label { font-size: 13px; line-height: 1.3; color: var(--text); padding-top: 1px; }
 .sfchat-tl-step.done .sfchat-tl-label { color: var(--muted); }
@@ -1417,16 +1416,11 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 .sfchat-retry:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .sfchat-retry svg { flex-shrink: 0; }
 
-/* Meta row under a reply: the answering-model caption and the thumbs share one line, left-aligned. */
-.sfchat-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-
-/* Message rating: a quiet thumbs up/down pair. Muted until hovered; the chosen thumb stays filled
-   with an accent-tinted pill — the same "selected" language used across the panel, so a downvote
-   reads as feedback, not an error (no danger colour). */
-.sfchat-rate { display: inline-flex; align-items: center; gap: 2px; }
-/* Pull the thumbs to the content edge only when they lead the row (no model caption before them),
-   so the icon's optical edge lines up with the reply text above. */
-.sfchat-meta > .sfchat-rate:first-child { margin-left: -5px; }
+/* Message rating: a quiet thumbs up/down pair under a reply. Muted until hovered; the chosen thumb
+   stays filled with an accent-tinted pill — the same "selected" language used across the panel, so a
+   downvote reads as feedback, not an error (no danger colour). The negative margin lines the icon's
+   optical edge up with the reply text above. */
+.sfchat-rate { display: inline-flex; align-items: center; gap: 2px; margin-left: -5px; }
 .sfchat-rate-btn {
   display: grid; place-items: center; padding: 5px; border-radius: 7px;
   background: none; border: none; cursor: pointer; color: var(--muted);
@@ -1440,7 +1434,6 @@ body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
 /* Follow-up suggestions: the agent's proposed next questions, as chips under the latest reply.
    Reuses .sfchat-chip; this only stacks them under a quiet caption, aligned to the message body. */
 .sfchat-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; margin-top: 2px; }
-.sfchat-followups .sfchat-suglabel { margin-bottom: 1px; }
 
 .sfchat-caret { display: inline-block; width: 2px; height: 1em; background: var(--accent); margin-left: 2px; vertical-align: text-bottom; animation: sfchat-blink 1s step-end infinite; }
 @keyframes sfchat-blink { 50% { opacity: 0; } }
