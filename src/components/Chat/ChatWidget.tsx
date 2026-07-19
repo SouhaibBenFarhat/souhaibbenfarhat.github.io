@@ -379,13 +379,19 @@ function ChatPanel() {
     } else forget();
   }, [storedId, loadingHistory, restore.data]);
 
-  // Push the page over (desktop) rather than covering it; the panel width is
-  // shared with the page via a CSS variable.
+  // Reserve the panel's side gutter for the whole time the assistant is mounted (owner-only),
+  // independent of open/close, so the page never shifts. The gutter is pre-reserved before
+  // hydration by an inline script in Base.astro; this just keeps it in place across the mount.
+  // The layout rules live in global.css so the reservation exists from first paint.
   useEffect(() => {
-    document.body.classList.toggle('sfchat-pushed', open);
-    document.body.style.setProperty('--sfchat-w', `${width}px`);
+    document.body.classList.add('sfchat-pushed');
     return () => document.body.classList.remove('sfchat-pushed');
-  }, [open, width]);
+  }, []);
+
+  // Keep the shared width variable in sync as the panel is resized.
+  useEffect(() => {
+    document.body.style.setProperty('--sfchat-w', `${width}px`);
+  }, [width]);
 
   // Drag-to-resize from the left edge.
   useEffect(() => {
@@ -1313,13 +1319,8 @@ function AgentIcon() {
 }
 
 const CSS = `
-/* Push the page over on desktop instead of covering it. */
-@media (min-width: 880px) {
-  body { transition: margin-right .44s cubic-bezier(.22,.61,.36,1); }
-  body.sfchat-pushed { margin-right: calc(var(--sfchat-w, 460px) + 32px); }
-  body.sfchat-resizing { transition: none; }
-}
-body.sfchat-resizing, body.sfchat-resizing * { user-select: none !important; }
+/* The page-layout rules for the reserved gutter (body.sfchat-pushed / .sfchat-resizing) live
+   in global.css, so the gutter exists from first paint — before this island hydrates. */
 
 .sfchat-fab {
   position: fixed; right: 22px; bottom: 22px; z-index: 60;

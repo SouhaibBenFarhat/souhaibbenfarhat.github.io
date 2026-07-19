@@ -1,17 +1,8 @@
 ---
-import { intro, education, languages, profile } from '../../data/site';
-
-const principles = [
-  { t: 'Build first, then align', d: 'I prototype to make the case, then bring people in — momentum starts with a working thing to react to, not a slide.' },
-  { t: 'Make it hold', d: 'I care about durable work — genuine quality I am proud of, built to last and easy to extend, not just shipped and forgotten.' },
-  { t: 'Taste is a skill', d: 'A strong sense of what good UI and good product feel like — judgment for what is worth building, and what is not, beyond what was asked.' },
-  { t: 'Think in systems', d: 'Architecture and trade-offs up front; finding the signal in unclear requirements and shipping the thing that actually matters.' },
-  { t: 'Own it end to end', d: 'I follow under-defined work across the stack — UI, API, infrastructure — because that is what keeps it, and the team, unblocked.' },
-  { t: 'Amplify', d: 'Make what our stack and AI can do visible, lift the people around me, and leave reviews, tooling, and patterns others can build on.' },
-];
+import { intro, profile } from '../../data/site';
 ---
 <section id="about" class="scroll-mt-24 border-t border-line">
-  <div class="wrap pt-16 sm:pt-20">
+  <div class="wrap py-16 sm:py-20">
     <p class="label">About</p>
     <div class="mt-6 grid gap-10 md:grid-cols-[1.6fr_1fr] md:gap-14">
       <div>
@@ -34,45 +25,6 @@ const principles = [
           <a href={profile.cv} class="btn-solid mt-6 w-full justify-center" download>Download CV</a>
         </div>
       </aside>
-    </div>
-  </div>
-
-  <div class="wrap py-14">
-    <p class="label reveal">How I work</p>
-    <div class="mt-8 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
-      {principles.map((p, i) => (
-        <div class="reveal bg-surface p-7" style={`transition-delay:${i * 70}ms`}>
-          <p class="font-display text-lg">{p.t}</p>
-          <p class="mt-2 text-[0.95rem] leading-relaxed text-muted">{p.d}</p>
-        </div>
-      ))}
-    </div>
-  </div>
-
-  <div class="wrap pb-16 sm:pb-20">
-    <div class="grid gap-12 md:grid-cols-2">
-      <div class="reveal">
-        <p class="label">Education</p>
-        <ul class="mt-6 space-y-6">
-          {education.map((e) => (
-            <li class="border-l border-line pl-5">
-              <p class="font-display text-lg leading-tight">{e.school}</p>
-              <p class="mt-1 text-[0.95rem] text-muted">{e.detail}</p>
-              <p class="mt-1 text-xs uppercase tracking-label text-muted">{e.years} · {e.place}</p>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div class="reveal">
-        <p class="label">Languages</p>
-        <ul class="mt-6 space-y-4">
-          {languages.map((l) => (
-            <li class="flex items-center justify-between border-b border-line pb-3 text-[0.95rem]">
-              <span>{l.name}</span><span class="text-sm text-muted">{l.level}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
     </div>
   </div>
 </section>
