@@ -307,6 +307,19 @@ function ChatPanel() {
   const stopRef = useRef<(() => void) | null>(null);
   const barRO = useRef<ResizeObserver | null>(null);
   const stuckRef = useRef(true); // is auto-scroll following the bottom? false once the user scrolls up
+  // Focus & modal plumbing for the panel: refs to move focus with open/close, flags so focus only
+  // moves on a real user action (never the silent auto-open), and `overlay` (fullscreen mobile) to
+  // gate the focus-trap + aria-modal — desktop is a docked side panel and deliberately doesn't trap.
+  const panelRef = useRef<HTMLElement>(null);
+  const fabRef = useRef<HTMLButtonElement>(null);
+  const openedByUser = useRef(false);
+  const closedByUser = useRef(false);
+  const [overlay, setOverlay] = useState(false);
+  // Off-screen screen-reader announcement for a finished reply (see the announce effect below).
+  const [liveAnnounce, setLiveAnnounce] = useState('');
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  messagesRef.current = messages;
+  const lastAnnouncedRef = useRef('');
   const welcomeDone = welcome.length >= WELCOME.length;
 
   const restore = useConversation(storedId);
@@ -412,6 +425,94 @@ function ChatPanel() {
       vv.removeEventListener('scroll', sync);
     };
   }, []);
+
+  // --- Accessibility: keep the collapsed panel out of the way, and move focus with it ---------
+
+  // Is the panel a fullscreen overlay (mobile)? matchMedia is absent under jsdom, so this stays
+  // false there — no trap / aria-modal in tests, which matches the docked desktop behaviour.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(max-width: 600px)');
+    const on = () => setOverlay(mq.matches);
+    on();
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+
+  // Collapsed panel → inert (out of the tab order AND the a11y tree; aria-hidden alone leaves its
+  // controls tabbable). Mirror it on the launcher (FAB) while the panel is open. Declared BEFORE the
+  // focus effect so a target is un-inerted before we try to focus it.
+  useEffect(() => {
+    if (panelRef.current) panelRef.current.inert = !open;
+    if (fabRef.current) fabRef.current.inert = open;
+  }, [open]);
+
+  // Move focus with the panel: into it when the user opens it (never the silent auto-open, and onto
+  // the panel — not the textarea — so the mobile keyboard doesn't pop), back to the launcher on close.
+  useEffect(() => {
+    if (open && openedByUser.current) {
+      openedByUser.current = false;
+      panelRef.current?.focus();
+    } else if (!open && closedByUser.current) {
+      closedByUser.current = false;
+      fabRef.current?.focus();
+    }
+  }, [open]);
+
+  // Escape closes the panel and restores focus — unless the delete-confirm popover is open, which
+  // owns Escape for itself.
+  useEffect(() => {
+    if (!open || confirmingDelete) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closedByUser.current = true;
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, confirmingDelete]);
+
+  // Trap Tab within the panel while it's a fullscreen overlay (mobile), so focus can't slip behind it
+  // to the page underneath. Desktop stays a docked, non-trapping panel (the page is still usable).
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !overlay || !panel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const f = panel.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      );
+      if (!f.length) return;
+      const first = f[0];
+      const last = f[f.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    panel.addEventListener('keydown', onKey);
+    return () => panel.removeEventListener('keydown', onKey);
+  }, [open, overlay]);
+
+  // Announce a finished reply to screen readers once. A polite live region on the streaming bubble
+  // would re-announce on every token; instead, when the turn settles, mirror the RENDERED reply
+  // (plain text — markdown already resolved, so no "**" read aloud) into an off-screen live region.
+  useEffect(() => {
+    if (busy) return;
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (last?.role !== 'assistant' || !last.content || last.errored) return;
+    const rendered = panelRef.current?.querySelectorAll('.sfchat-bubble.assistant .sfchat-md');
+    const text = (rendered?.length ? rendered[rendered.length - 1].textContent : last.content)?.trim();
+    if (text && text !== lastAnnouncedRef.current) {
+      lastAnnouncedRef.current = text;
+      setLiveAnnounce(`Assistant replied: ${text}`);
+    }
+  }, [busy]);
 
   // Drag-to-resize from the left edge.
   useEffect(() => {
@@ -858,13 +959,14 @@ function ChatPanel() {
   }
 
   // Composer submit: stream the turn now if the agent is free, otherwise queue it to fire when the
-  // current reply finishes (the drain effect). Always clears the composer and keeps the caret there,
-  // so the next prompt can be typed straight away — including while a reply is still streaming.
-  const send = (text: string) => {
+  // current reply finishes (the drain effect). Clears the composer; keeps the caret in it for a real
+  // composer submit (`focusField`), so the next prompt can be typed straight away — but NOT when a
+  // suggestion chip is tapped, where refocusing the textarea is what pops the iOS keyboard.
+  const send = (text: string, focusField = true) => {
     text = text.trim();
     if (!text || usage?.exhausted) return;
     setInput('');
-    fieldRef.current?.focus();
+    if (focusField) fieldRef.current?.focus();
     stuckRef.current = true; // submitting re-engages auto-scroll, so the reply is followed
     setShowJump(false);
     if (busy) setQueue((q) => [...q, text]);
@@ -940,14 +1042,26 @@ function ChatPanel() {
       <style>{CSS}</style>
 
       <button
+        ref={fabRef}
         className={`sfchat-fab ${open ? 'sfchat-hidden' : ''}`}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          openedByUser.current = true;
+          setOpen(true);
+        }}
         aria-label="Open the assistant"
       >
         <ChatIcon />
       </button>
 
-      <aside className={`sfchat-panel ${open ? 'sfchat-open' : ''}`} aria-hidden={!open} aria-label="AI assistant">
+      <aside
+        ref={panelRef}
+        className={`sfchat-panel ${open ? 'sfchat-open' : ''}`}
+        role="dialog"
+        aria-modal={overlay || undefined}
+        aria-label="AI assistant"
+        aria-hidden={!open}
+        tabIndex={-1}
+      >
         <div
           className="sfchat-resize"
           onPointerDown={(e) => {
@@ -1020,11 +1134,21 @@ function ChatPanel() {
                 )}
               </div>
             )}
-            <button className="sfchat-min" onClick={() => setOpen(false)} aria-label="Minimize">
+            <button
+              className="sfchat-min"
+              onClick={() => {
+                closedByUser.current = true;
+                setOpen(false);
+              }}
+              aria-label="Minimize"
+            >
               <MinIcon />
             </button>
           </div>
         </header>
+
+        {/* Off-screen polite live region — tells a screen reader when a reply has landed. */}
+        <div className="sr-only" aria-live="polite" aria-atomic="true">{liveAnnounce}</div>
 
         <div
           className="sfchat-list"
@@ -1055,7 +1179,7 @@ function ChatPanel() {
             <div className="sfchat-suggest sfchat-enter">
               <span className="sfchat-suglabel">Try asking</span>
               {SUGGESTIONS.map((s) => (
-                <button key={s} className="sfchat-chip" onClick={() => send(s)}>
+                <button key={s} className="sfchat-chip" onClick={() => send(s, false)}>
                   <span>{s}</span>
                   <ArrowIcon />
                 </button>
@@ -1131,7 +1255,7 @@ function ChatPanel() {
                     {followups.length > 0 && (
                       <div className="sfchat-followups">
                         {followups.map((s) => (
-                          <button key={s} type="button" className="sfchat-chip" onClick={() => send(s)}>
+                          <button key={s} type="button" className="sfchat-chip" onClick={() => send(s, false)}>
                             <span>{s}</span>
                             <ArrowIcon />
                           </button>
@@ -1259,7 +1383,7 @@ function ChatPanel() {
               <p className="sfchat-note">
                 <span className="sfchat-note-text">
                   <Info size={12} strokeWidth={2} />
-                  This assistant is rate-limited to keep it free.
+                  <span className="sfchat-note-label">This assistant is rate-limited to keep it free.</span>
                 </span>
                 <ContextGauge usage={usage} />
               </p>
@@ -1644,6 +1768,8 @@ const CSS = `
 .sfchat-field::placeholder { color: var(--muted); }
 .sfchat-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .sfchat-note-text { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* Truncate the disclaimer to one line instead of letting it wrap when the composer is narrow. */
+.sfchat-note-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sfchat-note svg { flex-shrink: 0; opacity: .8; }
 
 /* Context gauge: a hairline bar that stays quiet until the thread is nearly spent. No
