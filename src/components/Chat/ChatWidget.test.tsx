@@ -879,6 +879,38 @@ describe('ChatWidget — collapse and reopen', () => {
   });
 });
 
+describe('ChatWidget — panel focus & keyboard', () => {
+  it('closes the panel on Escape and returns focus to the launcher', async () => {
+    render(<ChatWidget />);
+    expect(await screen.findByRole('button', { name: 'Minimize' })).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull());
+    const fab = screen.getByRole('button', { name: 'Open the assistant' });
+    expect(document.activeElement).toBe(fab);
+  });
+
+  it('moves focus into the panel when the user opens it from the launcher', async () => {
+    render(<ChatWidget />);
+    // Minimize first — the silent auto-open must NOT grab focus, only a user open does.
+    fireEvent.click(await screen.findByRole('button', { name: 'Minimize' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open the assistant' }));
+
+    const panel = await screen.findByRole('dialog', { name: 'AI assistant' });
+    expect(document.activeElement).toBe(panel);
+  });
+
+  it('does not steal focus on the initial auto-open', async () => {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+    // A keyboard user reading the page must not be yanked into the assistant when it auto-opens.
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
 describe('ChatWidget — rating a message', () => {
   async function openPanel() {
     render(<ChatWidget />);
