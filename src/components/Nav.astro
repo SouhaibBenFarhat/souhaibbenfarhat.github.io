@@ -47,24 +47,40 @@ const initials = profile.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
 </header>
 
 <script is:inline>
-  document.getElementById('theme-toggle')?.addEventListener('click', () => {
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeMeta = document.getElementById('sf-theme-color');
+  // Keep the toggle's pressed state and the browser-chrome colour in step with the theme.
+  const syncTheme = () => {
+    const dark = document.documentElement.classList.contains('dark');
+    themeToggle?.setAttribute('aria-pressed', String(dark));
+    themeMeta?.setAttribute('content', dark ? '#0d0f12' : '#faf8f4');
+  };
+  syncTheme();
+  themeToggle?.addEventListener('click', () => {
     const root = document.documentElement;
     root.classList.toggle('dark');
     localStorage.setItem('theme', root.classList.contains('dark') ? 'dark' : 'light');
+    syncTheme();
   });
 
   const menuBtn = document.getElementById('menu-toggle');
   const mobileMenu = document.getElementById('mobile-menu');
+  const closeMenu = (returnFocus) => {
+    mobileMenu?.classList.add('hidden');
+    menuBtn?.setAttribute('aria-expanded', 'false');
+    if (returnFocus) menuBtn?.focus();
+  };
   menuBtn?.addEventListener('click', () => {
     const hidden = mobileMenu?.classList.toggle('hidden');
     menuBtn.setAttribute('aria-expanded', String(hidden === false));
   });
   mobileMenu?.querySelectorAll('a[data-nav]').forEach((a) =>
-    a.addEventListener('click', () => {
-      mobileMenu.classList.add('hidden');
-      menuBtn?.setAttribute('aria-expanded', 'false');
-    })
+    a.addEventListener('click', () => closeMenu(false))
   );
+  // Escape closes the open menu and returns focus to the toggle that opened it.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && mobileMenu && !mobileMenu.classList.contains('hidden')) closeMenu(true);
+  });
 
   const header = document.getElementById('site-header');
   const onScroll = () => header?.classList.toggle('scrolled', window.scrollY > 8);
@@ -76,7 +92,12 @@ const initials = profile.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
   const ids = ['home', 'about', 'experience', 'work', 'skills', 'contact'];
   const sections = ids.map((id) => document.getElementById(id)).filter(Boolean);
   const setActive = (id) =>
-    navLinks.forEach((l) => l.classList.toggle('is-active', l.getAttribute('data-nav') === '#' + id));
+    navLinks.forEach((l) => {
+      const active = l.getAttribute('data-nav') === '#' + id;
+      l.classList.toggle('is-active', active);
+      if (active) l.setAttribute('aria-current', 'true');
+      else l.removeAttribute('aria-current');
+    });
   const spy = new IntersectionObserver(
     (entries) => {
       const visible = entries
