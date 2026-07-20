@@ -64,7 +64,9 @@ const personSchema = {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {/* viewport-fit=cover lets the fullscreen mobile chat panel pad itself against the notch /
+        Dynamic Island and the home-indicator via env(safe-area-inset-*) (see ChatWidget). */}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     {/* iOS ignores SVG icons: without this, a home-screen bookmark is a page screenshot. Square
         and opaque on purpose — iOS applies its own mask, and would composite alpha onto black. */}
