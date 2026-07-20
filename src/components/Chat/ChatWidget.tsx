@@ -393,6 +393,26 @@ function ChatPanel() {
     document.body.style.setProperty('--sfchat-w', `${width}px`);
   }, [width]);
 
+  // Pin the fullscreen mobile panel to the VISUAL viewport, so the iOS keyboard shrinks the panel
+  // rather than covering the composer. visualViewport is absent under jsdom (and older engines) —
+  // then the panel keeps its 100dvh fallback and native behaviour. Desktop ignores these vars (they
+  // are only read in the <=600px media query).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => {
+      document.body.style.setProperty('--sfchat-vvh', `${vv.height}px`);
+      document.body.style.setProperty('--sfchat-vvo', `${vv.offsetTop}px`);
+    };
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, []);
+
   // Drag-to-resize from the left edge.
   useEffect(() => {
     document.body.classList.toggle('sfchat-resizing', resizing);
@@ -1345,7 +1365,16 @@ const CSS = `
 }
 .sfchat-panel.sfchat-open { transform: none; opacity: 1; pointer-events: auto; }
 @media (max-width: 600px) {
-  .sfchat-panel { top: 0; right: 0; bottom: 0; left: 0; width: auto; max-width: none; border-radius: 0; border: none; }
+  /* Fullscreen, but pinned to the VISUAL viewport (--sfchat-vvh/vvo, set from visualViewport in JS)
+     so the iOS software keyboard shrinks the panel instead of hiding the composer behind it — falls
+     back to 100dvh when visualViewport is unavailable. Inner padding uses the safe-area insets so the
+     header clears the notch / Dynamic Island and the composer clears the home-indicator bar. */
+  .sfchat-panel {
+    top: var(--sfchat-vvo, 0); left: 0; right: 0; bottom: auto;
+    height: var(--sfchat-vvh, 100dvh);
+    width: auto; max-width: none; border-radius: 0; border: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
 }
 
 /* Drag handle on the left edge — a rounded pill that appears on hover. */
@@ -1377,12 +1406,12 @@ const CSS = `
 .sfchat-avatar { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 14px; background: var(--accent); color: #fff; }
 .sfchat-avatar.sm { width: 24px; height: 24px; font-size: 12px; align-self: flex-start; margin-top: 1px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); }
 
-.sfchat-min { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; }
+.sfchat-min { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; min-width: 40px; min-height: 40px; }
 .sfchat-min:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
 
 /* Header actions: the destructive one sits left of minimize and stays quiet until hovered. */
 .sfchat-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-.sfchat-act { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; transition: color .15s ease, background .15s ease; }
+.sfchat-act { background: none; border: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 8px; display: grid; place-items: center; min-width: 40px; min-height: 40px; transition: color .15s ease, background .15s ease; }
 .sfchat-act:hover:not(:disabled) { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .sfchat-act:disabled { opacity: .35; cursor: not-allowed; }
 
@@ -1517,6 +1546,7 @@ const CSS = `
 .sfchat-rate { display: inline-flex; align-items: center; gap: 2px; margin-left: -5px; }
 .sfchat-rate-btn {
   display: grid; place-items: center; padding: 5px; border-radius: 7px;
+  min-width: 36px; min-height: 36px;
   background: none; border: none; cursor: pointer; color: var(--muted);
   transition: color .15s ease, background .15s ease;
 }
@@ -1608,7 +1638,9 @@ const CSS = `
 .sfchat-composer { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: var(--shadow-md); padding: 8px 8px 0; transition: border-color .15s ease, box-shadow .15s ease; }
 .sfchat-composer:focus-within { border-color: var(--accent); box-shadow: var(--shadow-lg); }
 .sfchat-composer-row { display: flex; align-items: center; gap: 6px; }
-.sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 15px; line-height: 1.5; padding: 16px 12px; resize: none; overflow-y: auto; min-height: 64px; max-height: 150px; }
+/* font-size MUST stay >= 16px: iOS Safari force-zooms the viewport when a focused field is smaller,
+   and it's the only text input on the site, so this is the one place that guard matters. */
+.sfchat-field { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font: inherit; font-size: 16px; line-height: 1.5; padding: 16px 12px; resize: none; overflow-y: auto; min-height: 64px; max-height: 150px; }
 .sfchat-field::placeholder { color: var(--muted); }
 .sfchat-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .sfchat-note-text { display: flex; align-items: center; gap: 5px; min-width: 0; }
@@ -1660,14 +1692,14 @@ const CSS = `
 .sfchat-spent-go:disabled { opacity: .55; cursor: default; }
 /* Dark accent is bright; ink text keeps AA contrast on the solid button (mirrors .btn-solid). */
 .dark .sfchat-spent-go { color: #08272a; }
-.sfchat-send { width: 42px; height: 42px; flex-shrink: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center; transition: opacity .15s ease, transform .12s ease; }
+.sfchat-send { width: 44px; height: 44px; flex-shrink: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; cursor: pointer; display: grid; place-items: center; transition: opacity .15s ease, transform .12s ease; }
 .sfchat-send:hover:not(:disabled) { transform: scale(1.05); }
 .sfchat-send:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Stop generating: a neutral, bordered button (not the accent send) that appears while a reply
    streams. It warms to the danger colour on hover to read as "halt", without shouting by default. */
 .sfchat-stop {
-  width: 42px; height: 42px; flex-shrink: 0; border-radius: 11px; cursor: pointer;
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 11px; cursor: pointer;
   display: grid; place-items: center;
   border: 1px solid var(--line); background: var(--surface); color: var(--muted);
   transition: color .15s ease, border-color .15s ease, background .15s ease, transform .12s ease;

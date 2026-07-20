@@ -41,6 +41,11 @@ html {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
+  /* Stop iOS Safari inflating body text in landscape, and drop the grey tap-flash on iOS —
+     the design already has explicit :hover / :focus-visible states to signal interaction. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body { margin: 0; }
