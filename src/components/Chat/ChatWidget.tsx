@@ -441,6 +441,22 @@ function ChatPanel() {
     return () => mq.removeEventListener?.('change', on);
   }, []);
 
+  // While the fullscreen mobile panel is open, lock the page behind it from scrolling — so iOS can't
+  // scroll the document (and drag the fixed panel with it) when the composer is focused, and the
+  // background can't peek through. The position:fixed + scroll-restore technique is what actually
+  // holds on iOS Safari. Desktop (docked panel, overlay=false) and jsdom never lock.
+  useEffect(() => {
+    if (!open || !overlay) return;
+    const scrollY = window.scrollY;
+    document.body.style.setProperty('--sfchat-lock-top', `-${scrollY}px`);
+    document.body.classList.add('sfchat-locked');
+    return () => {
+      document.body.classList.remove('sfchat-locked');
+      document.body.style.removeProperty('--sfchat-lock-top');
+      window.scrollTo(0, scrollY);
+    };
+  }, [open, overlay]);
+
   // Collapsed panel → inert (out of the tab order AND the a11y tree; aria-hidden alone leaves its
   // controls tabbable). Mirror it on the launcher (FAB) while the panel is open. Declared BEFORE the
   // focus effect so a target is un-inerted before we try to focus it.
