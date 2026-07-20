@@ -1159,6 +1159,25 @@ describe('ChatWidget — mobile keyboard layout', () => {
   });
 });
 
+describe('ChatWidget — mobile scroll lock', () => {
+  it('locks the page behind the fullscreen mobile panel while open, and restores scroll on close', async () => {
+    // Pretend we're on a phone so `overlay` turns on (jsdom has no matchMedia of its own).
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    const scrollTo = vi.fn();
+    vi.stubGlobal('scrollTo', scrollTo);
+
+    render(<ChatWidget />);
+    const min = await screen.findByRole('button', { name: 'Minimize' });
+    // Auto-opened on a phone → the page behind is locked from scrolling.
+    expect(document.body.classList.contains('sfchat-locked')).toBe(true);
+
+    fireEvent.click(min);
+    // Minimizing unlocks it and restores the scroll position.
+    await waitFor(() => expect(document.body.classList.contains('sfchat-locked')).toBe(false));
+    expect(scrollTo).toHaveBeenCalled();
+  });
+});
+
 describe('ChatWidget — public visitor', () => {
   it('renders for a visitor who is not in owner mode', async () => {
     mockInternal.value = false; // a regular visitor — no ?internal=1
