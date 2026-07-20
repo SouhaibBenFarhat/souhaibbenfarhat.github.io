@@ -1102,6 +1102,48 @@ describe('ChatWidget — follow-up suggestions', () => {
     // No suggestion frame → no chip row at all.
     expect(document.querySelector('.sfchat-followups')).toBeNull();
   });
+
+  it('does not focus the composer when a follow-up chip is tapped (no iOS keyboard pop)', async () => {
+    streamFrames = [
+      { conversation_id: CID },
+      { text: 'Answer.' },
+      { suggestions: ['Ask this next'] },
+      { done: true },
+    ];
+    await openPanel();
+    sendMessage('hi');
+    const chip = await screen.findByRole('button', { name: 'Ask this next' }, SETTLED);
+
+    // Sending via the button focused the composer; blur it, then tap the suggestion.
+    const field = screen.getByLabelText('Your message') as HTMLTextAreaElement;
+    field.blur();
+    expect(document.activeElement).not.toBe(field);
+
+    streamFrames = [{ conversation_id: CID }, { text: 'Follow-up.' }, { done: true }];
+    fireEvent.click(chip);
+
+    // The chip sends its text as a new turn, but must NOT refocus the textarea — focusing it inside
+    // the tap gesture is exactly what pops the iOS keyboard on a suggestion you never typed into.
+    expect(document.activeElement).not.toBe(field);
+    await waitFor(() => expect(streamCalls()).toHaveLength(2), SETTLED);
+    expect(JSON.parse(streamCalls()[1].body ?? '{}').message).toBe('Ask this next');
+  });
+});
+
+describe('ChatWidget — composer disclaimer', () => {
+  it('keeps the disclaimer on one line, truncating with an ellipsis instead of wrapping', async () => {
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+
+    // The text lives in its own element so it can ellipsize; without it a narrow composer wraps
+    // it onto a second line.
+    const label = document.querySelector('.sfchat-note-label');
+    expect(label?.textContent).toContain('rate-limited');
+
+    const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
+    expect(css).toMatch(/\.sfchat-note-label[^{]*\{[^}]*white-space:\s*nowrap/);
+    expect(css).toMatch(/\.sfchat-note-label[^{]*\{[^}]*text-overflow:\s*ellipsis/);
+  });
 });
 
 describe('ChatWidget — public visitor', () => {

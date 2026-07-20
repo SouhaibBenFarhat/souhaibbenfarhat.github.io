@@ -959,13 +959,14 @@ function ChatPanel() {
   }
 
   // Composer submit: stream the turn now if the agent is free, otherwise queue it to fire when the
-  // current reply finishes (the drain effect). Always clears the composer and keeps the caret there,
-  // so the next prompt can be typed straight away — including while a reply is still streaming.
-  const send = (text: string) => {
+  // current reply finishes (the drain effect). Clears the composer; keeps the caret in it for a real
+  // composer submit (`focusField`), so the next prompt can be typed straight away — but NOT when a
+  // suggestion chip is tapped, where refocusing the textarea is what pops the iOS keyboard.
+  const send = (text: string, focusField = true) => {
     text = text.trim();
     if (!text || usage?.exhausted) return;
     setInput('');
-    fieldRef.current?.focus();
+    if (focusField) fieldRef.current?.focus();
     stuckRef.current = true; // submitting re-engages auto-scroll, so the reply is followed
     setShowJump(false);
     if (busy) setQueue((q) => [...q, text]);
@@ -1178,7 +1179,7 @@ function ChatPanel() {
             <div className="sfchat-suggest sfchat-enter">
               <span className="sfchat-suglabel">Try asking</span>
               {SUGGESTIONS.map((s) => (
-                <button key={s} className="sfchat-chip" onClick={() => send(s)}>
+                <button key={s} className="sfchat-chip" onClick={() => send(s, false)}>
                   <span>{s}</span>
                   <ArrowIcon />
                 </button>
@@ -1254,7 +1255,7 @@ function ChatPanel() {
                     {followups.length > 0 && (
                       <div className="sfchat-followups">
                         {followups.map((s) => (
-                          <button key={s} type="button" className="sfchat-chip" onClick={() => send(s)}>
+                          <button key={s} type="button" className="sfchat-chip" onClick={() => send(s, false)}>
                             <span>{s}</span>
                             <ArrowIcon />
                           </button>
@@ -1382,7 +1383,7 @@ function ChatPanel() {
               <p className="sfchat-note">
                 <span className="sfchat-note-text">
                   <Info size={12} strokeWidth={2} />
-                  This assistant is rate-limited to keep it free.
+                  <span className="sfchat-note-label">This assistant is rate-limited to keep it free.</span>
                 </span>
                 <ContextGauge usage={usage} />
               </p>
@@ -1767,6 +1768,8 @@ const CSS = `
 .sfchat-field::placeholder { color: var(--muted); }
 .sfchat-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px -8px 0; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 .sfchat-note-text { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* Truncate the disclaimer to one line instead of letting it wrap when the composer is narrow. */
+.sfchat-note-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sfchat-note svg { flex-shrink: 0; opacity: .8; }
 
 /* Context gauge: a hairline bar that stays quiet until the thread is nearly spent. No
