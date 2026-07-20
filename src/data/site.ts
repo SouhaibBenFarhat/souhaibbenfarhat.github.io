@@ -15,7 +15,7 @@ export const profile = {
     'Souhaib Ben Farhat — Senior Fullstack Engineer (AI focus) in München. 8+ years in React, TypeScript & Python, now building AI agent products end to end.',
   location: 'München, Germany',
   availability: 'Open to remote roles across the EU',
-  email: 'souhaib.b.farhat@gmail.com',
+  email: 'souhaib.en.farhat@gmail.com',
   phone: '+49 163 214 9290',
   links: {
     linkedin: 'https://www.linkedin.com/in/souhaib-ben-farhat/?locale=en',
