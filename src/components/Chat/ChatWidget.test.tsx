@@ -1178,6 +1178,28 @@ describe('ChatWidget — mobile scroll lock', () => {
   });
 });
 
+describe('ChatWidget — mobile: dismiss keyboard on send', () => {
+  it('blurs the composer when you send on the fullscreen mobile panel (drops the keyboard)', async () => {
+    // Pretend we're on a phone so `overlay` is on; stub scrollTo for the mobile scroll-lock's cleanup.
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    vi.stubGlobal('scrollTo', vi.fn());
+    render(<ChatWidget />);
+    await screen.findByRole('button', { name: 'Minimize' });
+
+    const field = screen.getByLabelText('Your message') as HTMLTextAreaElement;
+    field.focus();
+    expect(document.activeElement).toBe(field);
+
+    fireEvent.change(field, { target: { value: 'hi' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    // On mobile, sending drops focus so the on-screen keyboard dismisses — unlike desktop, which
+    // keeps the caret in the composer (covered by the "composer focus" suite).
+    expect(document.activeElement).not.toBe(field);
+    await waitFor(() => expect(screen.getByText('Sure.')).not.toBeNull(), SETTLED);
+  });
+});
+
 describe('ChatWidget — public visitor', () => {
   it('renders for a visitor who is not in owner mode', async () => {
     mockInternal.value = false; // a regular visitor — no ?internal=1

@@ -977,14 +977,19 @@ function ChatPanel() {
   }
 
   // Composer submit: stream the turn now if the agent is free, otherwise queue it to fire when the
-  // current reply finishes (the drain effect). Clears the composer; keeps the caret in it for a real
-  // composer submit (`focusField`), so the next prompt can be typed straight away — but NOT when a
-  // suggestion chip is tapped, where refocusing the textarea is what pops the iOS keyboard.
+  // current reply finishes (the drain effect). Clears the composer. On desktop it keeps the caret in
+  // the field for a real composer submit (`focusField`), so the next prompt can be typed straight
+  // away; on the fullscreen mobile panel (`overlay`) it blurs instead, so sending dismisses the
+  // on-screen keyboard and the reply isn't left hidden behind it. A suggestion chip passes
+  // focusField=false and touches neither (refocusing there is what used to pop the iOS keyboard).
   const send = (text: string, focusField = true) => {
     text = text.trim();
     if (!text || usage?.exhausted) return;
     setInput('');
-    if (focusField) fieldRef.current?.focus();
+    if (focusField) {
+      if (overlay) fieldRef.current?.blur();
+      else fieldRef.current?.focus();
+    }
     stuckRef.current = true; // submitting re-engages auto-scroll, so the reply is followed
     setShowJump(false);
     if (busy) setQueue((q) => [...q, text]);
