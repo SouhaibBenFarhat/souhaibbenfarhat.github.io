@@ -406,16 +406,18 @@ function ChatPanel() {
     document.body.style.setProperty('--sfchat-w', `${width}px`);
   }, [width]);
 
-  // Pin the fullscreen mobile panel to the VISUAL viewport, so the iOS keyboard shrinks the panel
-  // rather than covering the composer. visualViewport is absent under jsdom (and older engines) —
-  // then the panel keeps its 100dvh fallback and native behaviour. Desktop ignores these vars (they
-  // are only read in the <=600px media query).
+  // Track the on-screen keyboard height so the mobile composer can sit just above it. The panel
+  // itself stays pinned to all four edges (see CSS) and always covers the screen — position:fixed is
+  // relative to the LAYOUT viewport, which iOS does NOT shrink for the keyboard, so sizing the panel
+  // to the visual viewport (what this used to do) left an uncovered strip that showed the page
+  // behind. visualViewport is absent under jsdom (and older engines) → --sfchat-kb just stays 0.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     const sync = () => {
-      document.body.style.setProperty('--sfchat-vvh', `${vv.height}px`);
-      document.body.style.setProperty('--sfchat-vvo', `${vv.offsetTop}px`);
+      // The bottom slice of the layout viewport the visual viewport no longer covers = the keyboard.
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.body.style.setProperty('--sfchat-kb', `${kb}px`);
     };
     sync();
     vv.addEventListener('resize', sync);
@@ -1154,8 +1156,9 @@ function ChatPanel() {
           className="sfchat-list"
           ref={listRef}
           onScroll={onListScroll}
-          // Reserve room for the floating composer so the last message clears it, not hides behind it.
-          style={barH ? { paddingBottom: barH + 8 } : undefined}
+          // Reserve room for the floating composer — plus, on mobile, the keyboard it lifts above —
+          // so the last message clears it rather than hiding behind it.
+          style={{ paddingBottom: `calc(${(barH || 0) + 8}px + var(--sfchat-kb, 0px))` }}
         >
           {loadingHistory && <ChatSkeleton />}
 
@@ -1489,16 +1492,18 @@ const CSS = `
 }
 .sfchat-panel.sfchat-open { transform: none; opacity: 1; pointer-events: auto; }
 @media (max-width: 600px) {
-  /* Fullscreen, but pinned to the VISUAL viewport (--sfchat-vvh/vvo, set from visualViewport in JS)
-     so the iOS software keyboard shrinks the panel instead of hiding the composer behind it — falls
-     back to 100dvh when visualViewport is unavailable. Inner padding uses the safe-area insets so the
-     header clears the notch / Dynamic Island and the composer clears the home-indicator bar. */
+  /* Fullscreen, pinned to ALL FOUR edges of the layout viewport so the panel always covers the
+     screen. position:fixed is relative to the layout viewport, which iOS does NOT shrink when the
+     keyboard opens, so a top+bottom pin can never leave a gap that reveals the page behind (sizing
+     to the visual viewport did exactly that). Only the composer moves for the keyboard, via
+     --sfchat-kb below. Inner padding uses the safe-area insets so the header clears the notch. */
   .sfchat-panel {
-    top: var(--sfchat-vvo, 0); left: 0; right: 0; bottom: auto;
-    height: var(--sfchat-vvh, 100dvh);
+    top: 0; left: 0; right: 0; bottom: 0; height: auto;
     width: auto; max-width: none; border-radius: 0; border: none;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  /* Lift the composer above the on-screen keyboard (height tracked from visualViewport in JS). */
+  .sfchat-panel .sfchat-composer-wrap { bottom: var(--sfchat-kb, 0px); }
 }
 
 /* Drag handle on the left edge — a rounded pill that appears on hover. */
