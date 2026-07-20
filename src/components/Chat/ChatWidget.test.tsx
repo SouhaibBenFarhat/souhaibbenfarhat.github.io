@@ -1146,6 +1146,19 @@ describe('ChatWidget — composer disclaimer', () => {
   });
 });
 
+describe('ChatWidget — mobile keyboard layout', () => {
+  it('pins the panel full-screen and only lifts the composer for the keyboard (no page bleed)', () => {
+    render(<ChatWidget />);
+    const css = Array.from(document.querySelectorAll('style')).map((s) => s.textContent).join('\n');
+
+    // The composer is lifted above the keyboard by the tracked keyboard height...
+    expect(css).toMatch(/\.sfchat-composer-wrap\s*\{[^}]*bottom:\s*var\(--sfchat-kb/);
+    // ...while the panel itself must NOT be sized to the visual viewport — doing that left a strip
+    // of the page showing behind the panel when the keyboard opened. Guard against reintroducing it.
+    expect(css).not.toMatch(/--sfchat-vvh/);
+  });
+});
+
 describe('ChatWidget — public visitor', () => {
   it('renders for a visitor who is not in owner mode', async () => {
     mockInternal.value = false; // a regular visitor — no ?internal=1
