@@ -1,0 +1,75 @@
+---
+import { writing } from '../../data/site';
+import { readOg } from '../../lib/og';
+
+// Read every essay's live OG tags once per build, in parallel. readOg never rejects — an
+// unreachable page falls back to the copy committed in site.ts — so this can't fail the build.
+// Each essay's og:image is the share card the writing repo's Action generates on push.
+const cards = await Promise.all(
+  writing.map(async (item) => {
+    const og = await readOg(item.url, item.fallback);
+    return { ...item, og };
+  }),
+);
+---
+<section id="writing" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <h2 class="max-w-3xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+      Writing
+    </h2>
+    <p class="mt-5 max-w-prose text-[0.95rem] leading-relaxed text-muted">
+      Essays on AI, abstraction, incentives, and the judgment a machine can't automate — the
+      thinking behind the engineering. Every card is that essay's own share card.
+    </p>
+
+    <div class="mt-10 grid gap-6 sm:grid-cols-2">
+      {cards.map((p, i) => (
+        <article
+          class="group reveal relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface transition-all duration-300 hover:-translate-y-1"
+          style={`transition-delay:${i * 70}ms; box-shadow: var(--shadow-sm)`}
+        >
+          {/* The essay's own og:image — same origin, so it needs no remote-image config, and it
+              refreshes the moment the writing repo redeploys. Fixed 1.91:1 box (the OG ratio). */}
+          <div class="overflow-hidden border-b border-line bg-bg">
+            <img
+              src={p.og.image}
+              alt={`${p.og.title} — share card`}
+              width="1200"
+              height="630"
+              loading="lazy"
+              decoding="async"
+              class="block aspect-[1200/630] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.03]"
+            />
+          </div>
+
+          <div class="flex flex-1 flex-col p-6">
+            <h3 class="font-display text-xl leading-tight tracking-tight">
+              {/* The ::after overlay makes the whole card one click target. */}
+              <a href={p.url} class="after:absolute after:inset-0">{p.og.title}</a>
+            </h3>
+            <p class="mt-2.5 flex-1 text-[0.93rem] leading-relaxed text-muted">{p.og.description}</p>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+              {p.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+
+            <div class="mt-5 flex items-center justify-between border-t border-line pt-4">
+              <span class="inline-flex items-center gap-1.5 text-sm font-medium text-accent">
+                Read the essay
+                <svg class="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              </span>
+              <span class="text-xs text-muted">{p.date}</span>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="mt-10">
+      <a href="/writing/" class="inline-flex items-center gap-1.5 text-sm font-medium text-accent transition-colors hover:text-ink">
+        All essays
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </div>
+</section>

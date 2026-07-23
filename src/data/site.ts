@@ -244,6 +244,85 @@ export const showcase: ShowcaseItem[] = [
   },
 ];
 
+// Essays — the Writing section. Like `showcase`, each card is the article's OWN
+// og:image / og:title / og:description, read at build time (src/lib/og.ts), so updating
+// (or adding) an essay updates its card here. The essays live in the separate `writing`
+// repo, deployed at /writing/, where a GitHub Action regenerates each share card on push.
+// `fallback` is the last known copy of those tags, so an unreachable page still renders.
+export type WritingItem = {
+  slug: string;
+  /** The article page: the card links here, and its OG tags are the card's content. */
+  url: string;
+  /** Human display date, shown on the card. */
+  date: string;
+  tags: string[];
+  fallback: { title: string; description: string; image: string };
+};
+
+const WRITING_BASE = 'https://souhaibbenfarhat.github.io/writing';
+
+export const writing: WritingItem[] = [
+  {
+    slug: 'the-senior-engineers-paradox',
+    url: `${WRITING_BASE}/the-senior-engineers-paradox.html`,
+    date: 'Jul 2026',
+    tags: ['Engineering leadership', 'Judgment'],
+    fallback: {
+      title: "The Senior Engineer's Paradox",
+      description:
+        'The more senior the room, the fewer facts are left to decide anything — so past a certain level, engineering stops being a technical problem and becomes a social one.',
+      image: `${WRITING_BASE}/og/the-senior-engineers-paradox.png`,
+    },
+  },
+  {
+    slug: 'race-to-the-optimum',
+    url: `${WRITING_BASE}/race-to-the-optimum.html`,
+    date: 'Jul 2026',
+    tags: ['AI', 'Systems thinking'],
+    fallback: {
+      title: 'The Race Is to the Optimum, Not the Maximum',
+      description:
+        "Thrust SSC, Landauer's limit, and why the fight isn't won by whoever builds the largest data centre.",
+      image: `${WRITING_BASE}/og/race-to-the-optimum.png`,
+    },
+  },
+  {
+    slug: 'from-where-im-sitting',
+    url: `${WRITING_BASE}/from-where-im-sitting.html`,
+    date: 'Jul 2026',
+    tags: ['Incentives', 'Media'],
+    fallback: {
+      title: "From Where I'm Sitting",
+      description:
+        "On misinformation, incentives, and the uncomfortable possibility that we're not the audience — we're the metric.",
+      image: `${WRITING_BASE}/og/from-where-im-sitting.png`,
+    },
+  },
+  {
+    slug: 'if-everyone-speeds-up-nobody-moves',
+    url: `${WRITING_BASE}/if-everyone-speeds-up-nobody-moves.html`,
+    date: 'Jul 2026',
+    tags: ['AI', 'Careers'],
+    fallback: {
+      title: 'If Everyone Speeds Up, Nobody Moves',
+      description: 'Notes on what AI actually moved, and what it only appeared to.',
+      image: `${WRITING_BASE}/og/if-everyone-speeds-up-nobody-moves.png`,
+    },
+  },
+  {
+    slug: 'ai-highest-abstraction',
+    url: `${WRITING_BASE}/ai-highest-abstraction.html`,
+    date: 'Jul 2026',
+    tags: ['AI', 'Abstraction'],
+    fallback: {
+      title: 'AI Is the Highest Abstraction Engineering Has Ever Built',
+      description:
+        'A reasoning journey — from a stranger\'s comment to something that finally held up.',
+      image: `${WRITING_BASE}/og/ai-highest-abstraction.png`,
+    },
+  },
+];
+
 export type Role = {
   company: string;
   /** Employer's website. Omitted for composite/earlier entries that aren't a single company. */
@@ -399,6 +478,7 @@ export const nav = [
   { href: '#about', label: 'About' },
   { href: '#experience', label: 'Experience' },
   { href: '#work', label: 'Work' },
+  { href: '#writing', label: 'Writing' },
   { href: '#skills', label: 'Skills' },
   { href: '#contact', label: 'Contact' },
 ];
