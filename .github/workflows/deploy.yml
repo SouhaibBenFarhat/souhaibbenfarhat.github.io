@@ -3,14 +3,20 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
-  # Fired by a project repo (easy-apply, code-lobby, gitswitch, easy-copy) when it publishes a
-  # release. The Showcase cards are baked from each project's live OG tags at build time
-  # (src/lib/og.ts), so refreshing a card means rebuilding this site — that's what this trigger
-  # is for. Send it with:
+  # Fired by a project repo (easy-apply, code-lobby, gitswitch, easy-copy) when its landing
+  # page changes. The Showcase cards are baked from each project's live OG tags at build time
+  # (src/lib/og.ts), so refreshing a card means rebuilding this site. Send it with:
   #   gh api repos/SouhaibBenFarhat/souhaibbenfarhat.github.io/dispatches \
   #     -f event_type=showcase-updated
+  # This is the fast path (~1 min), but it needs a PAT in each project repo. The schedule below
+  # is the fallback that needs no secret at all, so the cards self-heal either way.
   repository_dispatch:
     types: [showcase-updated]
+  # Daily rebuild, so a project's new OG tags reach the Showcase without anyone wiring up a
+  # token. Runs on the built-in GITHUB_TOKEN — no secret to create, nothing to rotate. 05:00 UTC
+  # is off-peak for Actions, which makes a queued run less likely.
+  schedule:
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 permissions:
