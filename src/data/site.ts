@@ -12,7 +12,7 @@ export const profile = {
   seoTitle: 'AI Senior Fullstack Engineer — Souhaib Ben Farhat',
   // Keyword-front-loaded description for search snippets & social cards (~150 chars).
   seoDescription:
-    'Souhaib Ben Farhat — Senior Fullstack Engineer (AI focus) in München. 8+ years in React, TypeScript & Python, now building AI agent products end to end.',
+    'Souhaib Ben Farhat — Senior Fullstack Engineer (AI focus) in München. 9+ years in React, TypeScript & Python, now building AI agent products end to end.',
   location: 'München, Germany',
   availability: 'Open to remote roles across the EU',
   email: 'souhaib.en.farhat@gmail.com',
@@ -26,13 +26,31 @@ export const profile = {
 };
 
 export const intro = [
-  `Senior fullstack engineer with 8+ years building SaaS products across React, TypeScript, and
+  `Senior fullstack engineer with 9+ years building SaaS products across React, TypeScript, and
    Python — now focused on AI products: agentic systems and LLM-backed features, shipped from the
    backend up to a refined interface.`,
   `I take fuzzy, under-defined problems and ship the thing that actually matters — designing and
    delivering features end to end, from backend services and agent tool-execution to polished,
    production-grade frontend experiences. I think hard about architecture and trade-offs, care about
    UI and product quality, and try to lift the people and the stack around me.`,
+];
+
+// Technologies surfaced in the hero, directly under the tagline: the core stack first, then the
+// AI/LLM tooling the positioning leads with. Rendered as `.tag` chips (the same pattern Work and
+// Experience use for their stacks) rather than a dot-separated sentence — the list is long enough
+// that a running text line would wrap into a wall and blur into the location/availability line
+// beneath it. Chips wrap gracefully, stay scannable, and leave room to grow.
+export const heroTech = [
+  'React',
+  'TypeScript',
+  'Python',
+  'RAG',
+  'CAG',
+  'LLM',
+  'Local LLM',
+  'MCP',
+  'LangChain',
+  'LangGraph',
 ];
 
 // Short, skimmable value props for the home hero.
