@@ -8,7 +8,10 @@ import { readOg } from '../../lib/og';
 const cards = await Promise.all(
   writing.map(async (item) => {
     const og = await readOg(item.url, item.fallback);
-    return { ...item, og };
+    // The light-mode card sits beside the dark one in the writing repo: the Action renders
+    // both, named <slug>.png (dark, the canonical og:image) and <slug>-light.png.
+    const lightImage = og.image.replace(/\.png$/, '-light.png');
+    return { ...item, og, lightImage };
   }),
 );
 ---
@@ -31,6 +34,19 @@ const cards = await Promise.all(
           {/* The essay's own og:image — same origin, so it needs no remote-image config, and it
               refreshes the moment the writing repo redeploys. Fixed 1.91:1 box (the OG ratio). */}
           <div class="overflow-hidden border-b border-line bg-bg">
+            {/* Light card in light mode, dark card in dark mode — follows the site's `.dark`
+                toggle (Tailwind `darkMode: 'class'`), so it matches a manual theme switch too,
+                not just the OS preference. Exactly one is ever displayed; the other is
+                display:none and drops out of the a11y tree, so both carry the same alt. */}
+            <img
+              src={p.lightImage}
+              alt={`${p.og.title} — share card`}
+              width="1200"
+              height="630"
+              loading="lazy"
+              decoding="async"
+              class="block aspect-[1200/630] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.03] dark:hidden"
+            />
             <img
               src={p.og.image}
               alt={`${p.og.title} — share card`}
@@ -38,7 +54,7 @@ const cards = await Promise.all(
               height="630"
               loading="lazy"
               decoding="async"
-              class="block aspect-[1200/630] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.03]"
+              class="hidden aspect-[1200/630] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.03] dark:block"
             />
           </div>
 
