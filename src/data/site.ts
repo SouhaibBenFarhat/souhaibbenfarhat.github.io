@@ -157,6 +157,75 @@ export const projects: Project[] = [
   },
 ];
 
+// Shipped products of my own — the Showcase section. Unlike `projects` above (employer work,
+// described without internals and with nothing to link to), every one of these is public: a live
+// landing page, an open repo, and an installable app. They are the section that backs the claims.
+//
+// The card art and copy are each page's OWN og:image / og:title / og:description, read at build
+// time (src/lib/og.ts) — so a project's card is whatever that project currently advertises, and
+// updating a project's site updates its card here. `fallback` is the last known copy of those
+// tags, committed so an unreachable site degrades to the approved text instead of a blank card.
+export type ShowcaseItem = {
+  slug: string;
+  /** Landing page: the card links here, and its OG tags are the card's content. */
+  url: string;
+  /** Source, shown as a secondary link — the code is part of the evidence. */
+  repo: string;
+  tags: string[];
+  fallback: { title: string; description: string; image: string };
+};
+
+export const showcase: ShowcaseItem[] = [
+  {
+    slug: 'easy-apply',
+    url: 'https://souhaibbenfarhat.github.io/easy-apply/',
+    repo: 'https://github.com/SouhaibBenFarhat/easy-apply',
+    tags: ['Local LLM', 'AI agent', 'macOS', 'Open source'],
+    fallback: {
+      title: 'EasyApply — an AI job agent that runs on your own Mac',
+      description:
+        'An AI agent that reads your job-alert inbox on a local LLM — entirely on your Mac — and merges what it finds with six official job APIs into one deduplicated feed.',
+      image: 'https://souhaibbenfarhat.github.io/easy-apply/og.png',
+    },
+  },
+  {
+    slug: 'code-lobby',
+    url: 'https://souhaibbenfarhat.github.io/code-lobby/',
+    repo: 'https://github.com/SouhaibBenFarhat/code-lobby',
+    tags: ['Desktop app', 'Claude assistant', 'Code review'],
+    fallback: {
+      title: 'CodeLobby — Your pull requests, in one place',
+      description:
+        'A PR-centric desktop app for code review, with an integrated Claude assistant.',
+      image: 'https://souhaibbenfarhat.github.io/code-lobby/screenshot-dark.png',
+    },
+  },
+  {
+    slug: 'gitswitch',
+    url: 'https://souhaibbenfarhat.github.io/gitswitch/',
+    repo: 'https://github.com/SouhaibBenFarhat/gitswitch',
+    tags: ['SwiftUI', 'macOS', 'Menu bar', 'Homebrew'],
+    fallback: {
+      title: 'GitSwitch — switch GitHub accounts from your menu bar',
+      description:
+        'A native macOS menu bar app to switch between GitHub CLI accounts with one click.',
+      image: 'https://souhaibbenfarhat.github.io/gitswitch/og.png',
+    },
+  },
+  {
+    slug: 'easy-copy',
+    url: 'https://souhaibbenfarhat.github.io/easy-copy/',
+    repo: 'https://github.com/SouhaibBenFarhat/easy-copy',
+    tags: ['SwiftUI', 'macOS', 'Menu bar', 'Homebrew'],
+    fallback: {
+      title: 'EasyCopy — one-click copy for your go-to snippets',
+      description:
+        'A native macOS menu bar app that keeps your links, commands, and snippets one click from the clipboard.',
+      image: 'https://souhaibbenfarhat.github.io/easy-copy/og.png',
+    },
+  },
+];
+
 export type Role = {
   company: string;
   /** Employer's website. Omitted for composite/earlier entries that aren't a single company. */
@@ -308,6 +377,7 @@ export const languages = [
 
 // Single-page scroll: nav items are in-page section anchors (scroll-spy highlights the active one).
 export const nav = [
+  { href: '#projects', label: 'Projects' },
   { href: '#about', label: 'About' },
   { href: '#experience', label: 'Experience' },
   { href: '#work', label: 'Work' },
