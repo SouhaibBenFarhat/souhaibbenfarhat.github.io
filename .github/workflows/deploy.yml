@@ -3,6 +3,14 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Fired by a project repo (easy-apply, code-lobby, gitswitch, easy-copy) when it publishes a
+  # release. The Showcase cards are baked from each project's live OG tags at build time
+  # (src/lib/og.ts), so refreshing a card means rebuilding this site — that's what this trigger
+  # is for. Send it with:
+  #   gh api repos/SouhaibBenFarhat/souhaibbenfarhat.github.io/dispatches \
+  #     -f event_type=showcase-updated
+  repository_dispatch:
+    types: [showcase-updated]
   workflow_dispatch:
 
 permissions:

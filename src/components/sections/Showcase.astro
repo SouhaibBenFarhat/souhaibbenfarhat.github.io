@@ -1,0 +1,84 @@
+---
+import { showcase } from '../../data/site';
+import { readOg } from '../../lib/og';
+
+// Read every project's live OG tags once per build, in parallel. readOg never rejects — an
+// unreachable site falls back to the copy committed in site.ts — so this can't fail the build.
+const cards = await Promise.all(
+  showcase.map(async (item) => {
+    const og = await readOg(item.url, item.fallback);
+    // og:title is "Product — what it does". Lead the card with just the product name; the
+    // og:description below already says what it does, so keeping both would say it twice.
+    const name = og.title.split(' — ')[0];
+    return { ...item, og, name };
+  }),
+);
+---
+<section id="projects" class="scroll-mt-24 border-t border-line">
+  <div class="wrap py-16 sm:py-20">
+    <p class="label">Shipped</p>
+    <h2 class="mt-4 max-w-3xl font-display text-3xl leading-tight tracking-tight sm:text-4xl">
+      Products you can open right now
+    </h2>
+    <p class="mt-5 max-w-prose text-[0.95rem] leading-relaxed text-muted">
+      Products of my own, designed and built end to end — the app, the landing page, and the release
+      pipeline. Unlike the work above, there is nothing to take on trust here: every one is live,
+      open source, and installable. Each card is that project's own preview.
+    </p>
+
+    <div class="mt-10 grid gap-6 sm:grid-cols-2">
+      {cards.map((p, i) => (
+        <article
+          class="group reveal relative flex flex-col overflow-hidden rounded-2xl border border-line bg-surface transition-all duration-300 hover:-translate-y-1"
+          style={`transition-delay:${i * 70}ms; box-shadow: var(--shadow-sm)`}
+        >
+          {/* The project's own og:image — same origin, so it needs no remote-image config, and it
+              refreshes the moment that project redeploys. Fixed 1.91:1 box (the OG ratio) keeps the
+              grid even when a project ships a differently-proportioned image. */}
+          <div class="overflow-hidden border-b border-line bg-bg">
+            <img
+              src={p.og.image}
+              alt={`${p.name} — app preview`}
+              width="1200"
+              height="630"
+              loading="lazy"
+              decoding="async"
+              class="block aspect-[1200/630] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.03]"
+            />
+          </div>
+
+          <div class="flex flex-1 flex-col p-6">
+            <h3 class="font-display text-xl leading-tight tracking-tight">
+              {/* The ::after overlay makes the whole card one click target, without nesting the
+                  source link inside another <a> (invalid HTML). */}
+              <a href={p.url} target="_blank" rel="noopener" class="after:absolute after:inset-0">
+                {p.name}
+              </a>
+            </h3>
+            <p class="mt-2.5 flex-1 text-[0.93rem] leading-relaxed text-muted">{p.og.description}</p>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+              {p.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+
+            <div class="mt-5 flex items-center justify-between border-t border-line pt-4">
+              <span class="inline-flex items-center gap-1.5 text-sm font-medium text-accent">
+                Open the app
+                <svg class="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+              </span>
+              {/* Sits above the card-wide overlay so it stays independently clickable. */}
+              <a
+                href={p.repo}
+                target="_blank"
+                rel="noopener"
+                class="relative z-10 text-xs text-muted transition-colors hover:text-accent"
+              >
+                Source ↗
+              </a>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
