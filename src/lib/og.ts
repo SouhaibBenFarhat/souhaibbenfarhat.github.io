@@ -20,13 +20,16 @@ const TIMEOUT_MS = 8000;
 
 /** Read one `<meta>` value, accepting either attribute order (content before or after property). */
 function readMeta(html: string, prop: string): string | undefined {
+  // Capture the value with a backreference (\1) to its own opening quote, so the *other*
+  // quote type inside the value doesn't end the match early — e.g. an apostrophe in a
+  // double-quoted title (content="Engineer's Paradox") must not truncate to "Engineer".
   const patterns = [
-    new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*?content=["']([^"']*)["']`, 'i'),
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*?property=["']${prop}["']`, 'i'),
+    new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*?content=(["'])(.*?)\\1`, 'i'),
+    new RegExp(`<meta[^>]+content=(["'])(.*?)\\1[^>]*?property=["']${prop}["']`, 'i'),
   ];
   for (const re of patterns) {
     const m = html.match(re);
-    if (m?.[1]) return decodeEntities(m[1]);
+    if (m?.[2] !== undefined) return decodeEntities(m[2]);
   }
   return undefined;
 }
