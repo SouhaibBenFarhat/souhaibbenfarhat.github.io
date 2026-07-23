@@ -377,10 +377,10 @@ export const languages = [
 
 // Single-page scroll: nav items are in-page section anchors (scroll-spy highlights the active one).
 export const nav = [
+  { href: '#projects', label: 'Projects' },
   { href: '#about', label: 'About' },
   { href: '#experience', label: 'Experience' },
   { href: '#work', label: 'Work' },
-  { href: '#projects', label: 'Projects' },
   { href: '#skills', label: 'Skills' },
   { href: '#contact', label: 'Contact' },
 ];

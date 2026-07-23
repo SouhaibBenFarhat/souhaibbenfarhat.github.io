@@ -89,7 +89,7 @@ const initials = profile.name.split(' ').map((p) => p[0]).slice(0, 2).join('');
 
   // Scroll-spy: highlight the nav item for the section currently in view
   const navLinks = Array.from(document.querySelectorAll('[data-nav]'));
-  const ids = ['home', 'about', 'experience', 'work', 'projects', 'skills', 'contact'];
+  const ids = ['home', 'projects', 'about', 'experience', 'work', 'skills', 'contact'];
   const sections = ids.map((id) => document.getElementById(id)).filter(Boolean);
   const setActive = (id) =>
     navLinks.forEach((l) => {
